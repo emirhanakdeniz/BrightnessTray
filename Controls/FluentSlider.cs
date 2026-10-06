@@ -1,19 +1,40 @@
 namespace BrightnessTray.Controls;
 
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using BrightnessTray.Native;
+using BrightnessTray.UI;
 
 public sealed class FluentSlider : Control
 {
     private int _value;
+    private double _visualValue;
     private int _minimum = 0;
     private int _maximum = 100;
+
     private bool _isHovered;
     private bool _isDragging;
     private bool _isDarkMode = true;
     private bool _isMicaActive;
     private Color _accentColor = Color.FromArgb(0x00, 0x67, 0xC0);
+
+    // Easing animation state
+    private System.Windows.Forms.Timer? _easeTimer;
+    private readonly Stopwatch _easeStopwatch = new();
+    private double _easeStartVal;
+    private double _easeTargetVal;
+    private double _easeDurationMs = 100.0;
+
+    // Cached GDI pens and brushes to eliminate allocations in hot paths
+    private Pen? _unfilledPen;
+    private Pen? _filledPen;
+    private Pen? _outerPen;
+    private Pen? _focusPen;
+    private SolidBrush? _outerBrush;
+    private SolidBrush? _innerBrush;
+    private int _lastScaleDpi = -1;
 
     public event EventHandler<int>? ValueChanged;
 
@@ -60,8 +81,12 @@ public sealed class FluentSlider : Control
             if (_value != clamped)
             {
                 _value = clamped;
-                Invalidate();
                 ValueChanged?.Invoke(this, _value);
+                if (_isDragging || !AnimationInterop.IsAnimationEnabled())
+                {
+                    _visualValue = _value;
+                    Invalidate();
+                }
             }
         }
     }
@@ -86,7 +111,69 @@ public sealed class FluentSlider : Control
         _isDarkMode = isDark;
         _isMicaActive = isMica;
         _accentColor = accentColor;
+        DisposeCachedGdiResources();
         Invalidate();
+    }
+
+    private void EnsureGdiResources(float scale, int trackHeight, Color outerBodyColor, Color outerRingColor)
+    {
+        int curDpi = DeviceDpi;
+        if (_unfilledPen == null || _lastScaleDpi != curDpi)
+        {
+            DisposeCachedGdiResources();
+            _lastScaleDpi = curDpi;
+
+            Color unfilledColor = Theme.TrackUnfilled(_isDarkMode);
+            _unfilledPen = new Pen(unfilledColor, trackHeight)
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round
+            };
+
+            _filledPen = new Pen(_accentColor, trackHeight)
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round
+            };
+
+            float focusOffset = Math.Max(2f, 3f * scale);
+            _focusPen = new Pen(_isDarkMode ? Color.White : Color.Black, 1.5f);
+        }
+
+        // Fast update or reuse brushes
+        if (_outerBrush == null || _outerBrush.Color != outerBodyColor)
+        {
+            _outerBrush?.Dispose();
+            _outerBrush = new SolidBrush(outerBodyColor);
+        }
+
+        if (_outerPen == null || _outerPen.Color != outerRingColor)
+        {
+            _outerPen?.Dispose();
+            _outerPen = new Pen(outerRingColor, 1f);
+        }
+
+        if (_innerBrush == null || _innerBrush.Color != _accentColor)
+        {
+            _innerBrush?.Dispose();
+            _innerBrush = new SolidBrush(_accentColor);
+        }
+    }
+
+    private void DisposeCachedGdiResources()
+    {
+        _unfilledPen?.Dispose();
+        _unfilledPen = null;
+        _filledPen?.Dispose();
+        _filledPen = null;
+        _outerPen?.Dispose();
+        _outerPen = null;
+        _focusPen?.Dispose();
+        _focusPen = null;
+        _outerBrush?.Dispose();
+        _outerBrush = null;
+        _innerBrush?.Dispose();
+        _innerBrush = null;
     }
 
     protected override void OnPaintBackground(PaintEventArgs pevent)
@@ -115,39 +202,10 @@ public sealed class FluentSlider : Control
             return;
         }
 
-        double ratio = (_maximum > _minimum) ? (double)(_value - _minimum) / (_maximum - _minimum) : 0;
+        double ratio = (_maximum > _minimum) ? (_visualValue - _minimum) / (_maximum - _minimum) : 0;
         int thumbX = trackLeft + (int)Math.Round(ratio * trackWidth);
 
-        // 1. Draw unfilled track segment (subtle theme-aware gray)
-        Color unfilledColor = _isDarkMode
-            ? Color.FromArgb(75, 75, 75)
-            : Color.FromArgb(205, 205, 205);
-
-        using (var unfilledPen = new Pen(unfilledColor, trackHeight)
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round
-        })
-        {
-            g.DrawLine(unfilledPen, trackLeft, centerY, trackRight, centerY);
-        }
-
-        // 2. Draw filled track segment (system accent color)
-        if (thumbX > trackLeft)
-        {
-            using var filledPen = new Pen(_accentColor, trackHeight)
-            {
-                StartCap = LineCap.Round,
-                EndCap = LineCap.Round
-            };
-            g.DrawLine(filledPen, trackLeft, centerY, thumbX, centerY);
-        }
-
-        // 3. Draw circular thumb (Windows 11 Fluent style)
-        float outerX = thumbX - thumbRadius;
-        float outerY = centerY - thumbRadius;
-        var outerRect = new RectangleF(outerX, outerY, thumbSize, thumbSize);
-
+        // Determine theme-aware thumb body and ring colors
         Color outerBodyColor;
         Color outerRingColor;
 
@@ -188,16 +246,33 @@ public sealed class FluentSlider : Control
             }
         }
 
-        // Outer circular body
-        using (var outerBrush = new SolidBrush(outerBodyColor))
+        EnsureGdiResources(scale, trackHeight, outerBodyColor, outerRingColor);
+
+        // 1. Draw unfilled track segment
+        if (_unfilledPen != null)
         {
-            g.FillEllipse(outerBrush, outerRect);
+            g.DrawLine(_unfilledPen, trackLeft, centerY, trackRight, centerY);
         }
 
-        // 1px outer ring
-        using (var outerPen = new Pen(outerRingColor, 1f))
+        // 2. Draw filled track segment
+        if (thumbX > trackLeft && _filledPen != null)
         {
-            g.DrawEllipse(outerPen, outerRect.X + 0.5f, outerRect.Y + 0.5f, outerRect.Width - 1f, outerRect.Height - 1f);
+            g.DrawLine(_filledPen, trackLeft, centerY, thumbX, centerY);
+        }
+
+        // 3. Draw circular thumb (Windows 11 Fluent style)
+        float outerX = thumbX - thumbRadius;
+        float outerY = centerY - thumbRadius;
+        var outerRect = new RectangleF(outerX, outerY, thumbSize, thumbSize);
+
+        if (_outerBrush != null)
+        {
+            g.FillEllipse(_outerBrush, outerRect);
+        }
+
+        if (_outerPen != null)
+        {
+            g.DrawEllipse(_outerPen, outerRect.X + 0.5f, outerRect.Y + 0.5f, outerRect.Width - 1f, outerRect.Height - 1f);
         }
 
         // Inner accent dot (grows slightly on hover and press)
@@ -206,13 +281,13 @@ public sealed class FluentSlider : Control
         float innerRadius = innerDiameter / 2f;
         var innerRect = new RectangleF(thumbX - innerRadius, centerY - innerRadius, innerDiameter, innerDiameter);
 
-        using (var innerBrush = new SolidBrush(_accentColor))
+        if (_innerBrush != null)
         {
-            g.FillEllipse(innerBrush, innerRect);
+            g.FillEllipse(_innerBrush, innerRect);
         }
 
         // 4. Focus visual (Windows 11 focus ring)
-        if (Focused)
+        if (Focused && _focusPen != null)
         {
             float focusOffset = Math.Max(2f, 3f * scale);
             var focusRect = new RectangleF(
@@ -221,8 +296,7 @@ public sealed class FluentSlider : Control
                 outerRect.Width + 2 * focusOffset,
                 outerRect.Height + 2 * focusOffset);
 
-            using var focusPen = new Pen(_isDarkMode ? Color.White : Color.Black, 1.5f);
-            g.DrawEllipse(focusPen, focusRect);
+            g.DrawEllipse(_focusPen, focusRect);
         }
     }
 
@@ -250,10 +324,36 @@ public sealed class FluentSlider : Control
         if (e.Button == MouseButtons.Left)
         {
             Focus();
-            _isDragging = true;
-            Capture = true;
-            Value = ValueFromX(e.X);
-            Invalidate();
+            int targetVal = ValueFromX(e.X);
+
+            // Determine if clicking directly on thumb vs track jump
+            float scale = DeviceDpi / 96f;
+            int thumbRadius = (int)Math.Round(10f * scale);
+            int trackLeft = thumbRadius + (int)Math.Round(2f * scale);
+            int trackRight = Width - thumbRadius - (int)Math.Round(2f * scale);
+            int trackWidth = trackRight - trackLeft;
+
+            double curRatio = (_maximum > _minimum) ? (_visualValue - _minimum) / (_maximum - _minimum) : 0;
+            int curThumbX = trackLeft + (int)Math.Round(curRatio * trackWidth);
+
+            bool clickedNearThumb = Math.Abs(e.X - curThumbX) <= thumbRadius + ScalePixels(4);
+
+            if (clickedNearThumb)
+            {
+                // Instant 1:1 drag
+                StopEaseAnimation();
+                _isDragging = true;
+                Capture = true;
+                _visualValue = targetVal;
+                Value = targetVal;
+                Invalidate();
+            }
+            else
+            {
+                // Track click: ease to target over ~100ms, update Value optimistically
+                Value = targetVal;
+                StartEaseAnimation(_visualValue, targetVal, 100.0);
+            }
         }
     }
 
@@ -262,7 +362,10 @@ public sealed class FluentSlider : Control
         base.OnMouseMove(e);
         if (_isDragging)
         {
-            Value = ValueFromX(e.X);
+            int newVal = ValueFromX(e.X);
+            _visualValue = newVal;
+            Value = newVal;
+            Invalidate();
         }
         else
         {
@@ -307,7 +410,13 @@ public sealed class FluentSlider : Control
     {
         int notches = delta / 120;
         int step = notches != 0 ? notches * 5 : (delta > 0 ? 5 : -5);
-        Value = Math.Clamp(Value + step, _minimum, _maximum);
+        int targetVal = Math.Clamp(Value + step, _minimum, _maximum);
+
+        if (targetVal != Value)
+        {
+            Value = targetVal;
+            StartEaseAnimation(_visualValue, targetVal, 80.0);
+        }
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
@@ -315,6 +424,61 @@ public sealed class FluentSlider : Control
         base.OnMouseWheel(e);
         StepValue(e.Delta);
     }
+
+    private void StartEaseAnimation(double startVal, double targetVal, double durationMs)
+    {
+        if (!AnimationInterop.IsAnimationEnabled())
+        {
+            StopEaseAnimation();
+            _visualValue = targetVal;
+            Invalidate();
+            return;
+        }
+
+        _easeStartVal = startVal;
+        _easeTargetVal = targetVal;
+        _easeDurationMs = durationMs;
+        _easeStopwatch.Restart();
+
+        if (_easeTimer == null)
+        {
+            _easeTimer = new System.Windows.Forms.Timer { Interval = 15 };
+            _easeTimer.Tick += OnEaseTimerTick;
+        }
+
+        _easeTimer.Start();
+    }
+
+    private void OnEaseTimerTick(object? sender, EventArgs e)
+    {
+        double elapsed = _easeStopwatch.Elapsed.TotalMilliseconds;
+        double t = Math.Clamp(elapsed / _easeDurationMs, 0.0, 1.0);
+
+        // Cubic ease-out curve
+        double ease = 1.0 - Math.Pow(1.0 - t, 3);
+        _visualValue = _easeStartVal + (_easeTargetVal - _easeStartVal) * ease;
+        Invalidate();
+
+        if (t >= 1.0)
+        {
+            _visualValue = _easeTargetVal;
+            StopEaseAnimation();
+            Invalidate();
+        }
+    }
+
+    private void StopEaseAnimation()
+    {
+        if (_easeTimer != null)
+        {
+            _easeTimer.Stop();
+            _easeTimer.Tick -= OnEaseTimerTick;
+            _easeTimer.Dispose();
+            _easeTimer = null;
+        }
+    }
+
+    private int ScalePixels(int pixels) => (int)Math.Round(pixels * (DeviceDpi / 96f));
 
     protected override bool IsInputKey(Keys keyData)
     {
@@ -356,17 +520,24 @@ public sealed class FluentSlider : Control
                 break;
             case Keys.Home:
                 Value = _minimum;
+                StartEaseAnimation(_visualValue, _minimum, 80.0);
                 e.Handled = true;
                 return;
             case Keys.End:
                 Value = _maximum;
+                StartEaseAnimation(_visualValue, _maximum, 80.0);
                 e.Handled = true;
                 return;
         }
 
         if (delta != 0)
         {
-            Value = Math.Clamp(Value + delta, _minimum, _maximum);
+            int targetVal = Math.Clamp(Value + delta, _minimum, _maximum);
+            if (targetVal != Value)
+            {
+                Value = targetVal;
+                StartEaseAnimation(_visualValue, targetVal, 80.0);
+            }
             e.Handled = true;
         }
     }
@@ -381,5 +552,16 @@ public sealed class FluentSlider : Control
     {
         base.OnLostFocus(e);
         Invalidate();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            StopEaseAnimation();
+            DisposeCachedGdiResources();
+        }
+
+        base.Dispose(disposing);
     }
 }

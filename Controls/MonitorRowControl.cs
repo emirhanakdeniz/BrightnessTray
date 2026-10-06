@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using BrightnessTray.Native;
 using BrightnessTray.Services;
+using BrightnessTray.UI;
 
 public sealed class MonitorRowControl : Panel
 {
@@ -46,7 +47,8 @@ public sealed class MonitorRowControl : Panel
     public string DisplayName => _currentDisplayName;
     public bool IsEditing => _isEditing;
 
-    private int Scale(int pixels) => (int)Math.Round(pixels * (DeviceDpi / 96f));
+    private float DpiScale => DeviceDpi / 96f;
+    private int Scale(int pixels) => Theme.Scale(pixels, DpiScale);
 
     public MonitorRowControl(
         MonitorInfo monitor,
@@ -68,14 +70,14 @@ public sealed class MonitorRowControl : Panel
         DoubleBuffered = true;
         BackColor = Color.Transparent;
         Margin = Padding.Empty;
-        Padding = new Padding(Scale(8), Scale(4), Scale(8), Scale(4));
+        Padding = new Padding(Theme.Space8(DpiScale), Theme.Space4(DpiScale), Theme.Space8(DpiScale), Theme.Space4(DpiScale));
         TabStop = false;
 
-        // Top Row: [Monitor Icon U+E7F4] [Monitor Name (secondary)] [Pencil Glyph U+E70F] [Optional Software Badge]
+        // Top Row: [Monitor Icon U+E7F4] [Monitor Name (12px secondary)] [Pencil Glyph U+E70F] [Optional Software Badge]
         _topPanel = new Panel
         {
             Dock = DockStyle.Top,
-            Height = Scale(18),
+            Height = Scale(20),
             BackColor = Color.Transparent,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
@@ -85,9 +87,9 @@ public sealed class MonitorRowControl : Panel
         _monitorGlyph = new FluentLabel
         {
             Text = "\uE7F4", // Segoe Fluent Icons: TVMonitor / Screen
-            Font = FluentTypography.CreateGlyphFont(9.5f),
+            Font = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphMedium),
             Dock = DockStyle.Left,
-            Width = Scale(18),
+            Width = Scale(20),
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = Padding.Empty,
             TabStop = false
@@ -107,9 +109,9 @@ public sealed class MonitorRowControl : Panel
         _pencilButton = new FluentLabel
         {
             Text = "\uE70F", // Segoe Fluent Icons: Edit / Pencil
-            Font = FluentTypography.CreateGlyphFont(8.5f),
+            Font = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphSmall),
             Dock = DockStyle.Right,
-            Width = Scale(18),
+            Width = Scale(20),
             TextAlign = ContentAlignment.MiddleCenter,
             Margin = Padding.Empty,
             TabStop = false,
@@ -163,11 +165,11 @@ public sealed class MonitorRowControl : Panel
         _topPanel.Controls.Add(_nameLabel);
         _topPanel.Controls.Add(_monitorGlyph);
 
-        // Bottom Row: [Brightness Icon U+E706] [FluentSlider] [Percent Label]
+        // Bottom Row: [Brightness Icon U+E706] [FluentSlider] [Percent Label (14px primary tabular)]
         _bottomTable = new TableLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = Scale(30),
+            Height = Scale(32),
             ColumnCount = 3,
             RowCount = 1,
             BackColor = Color.Transparent,
@@ -178,12 +180,12 @@ public sealed class MonitorRowControl : Panel
 
         _bottomTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(20)));
         _bottomTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        _bottomTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(44)));
+        _bottomTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(48)));
 
         _brightnessGlyph = new FluentLabel
         {
             Text = "\uE706", // Segoe Fluent Icons: Brightness
-            Font = FluentTypography.CreateGlyphFont(9.5f),
+            Font = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphMedium),
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
             Margin = Padding.Empty,
@@ -195,7 +197,7 @@ public sealed class MonitorRowControl : Panel
             Minimum = 0,
             Maximum = 100,
             Dock = DockStyle.Fill,
-            Height = Scale(30),
+            Height = Scale(32),
             Margin = Padding.Empty,
             TabStop = true,
             TabIndex = 0
@@ -289,6 +291,13 @@ public sealed class MonitorRowControl : Panel
             {
                 _pencilButton.Visible = hovered;
             }
+
+            // Low-contrast icons illuminate to primary when hovered
+            Color iconColor = hovered ? Theme.TextPrimary(_isDarkMode) : Theme.TextLowContrast(_isDarkMode);
+            _monitorGlyph.ForeColor = iconColor;
+            _brightnessGlyph.ForeColor = iconColor;
+            _pencilButton.ForeColor = iconColor;
+
             Invalidate();
         }
     }
@@ -306,15 +315,15 @@ public sealed class MonitorRowControl : Panel
         _nameLabel.Visible = false;
         _pencilButton.Visible = false;
 
-        Color fieldBg = _isDarkMode ? Color.FromArgb(45, 45, 48) : Color.FromArgb(240, 240, 240);
-        Color textColor = _isDarkMode ? Color.White : Color.FromArgb(27, 27, 27);
+        Color fieldBg = Theme.FieldBackground(_isDarkMode);
+        Color textColor = Theme.TextPrimary(_isDarkMode);
 
         _inlineContainer = new Panel
         {
             Dock = DockStyle.Fill,
             BackColor = fieldBg,
-            Padding = new Padding(Scale(4), Scale(1), Scale(4), Scale(2)),
-            Height = Scale(18),
+            Padding = new Padding(Theme.Space4(DpiScale), 1, Theme.Space4(DpiScale), Theme.Space4(DpiScale)),
+            Height = Scale(20),
             TabStop = false
         };
 
@@ -447,26 +456,23 @@ public sealed class MonitorRowControl : Panel
 
     private void ApplyDpiMetrics()
     {
-        Padding = new Padding(Scale(8), Scale(4), Scale(8), Scale(4));
-        _topPanel.Height = Scale(18);
-        _monitorGlyph.Width = Scale(18);
-        _pencilButton.Width = Scale(18);
+        float scale = DpiScale;
+        Padding = new Padding(Theme.Space8(scale), Theme.Space4(scale), Theme.Space8(scale), Theme.Space4(scale));
+        _topPanel.Height = Scale(20);
+        _monitorGlyph.Width = Scale(20);
+        _pencilButton.Width = Scale(20);
 
-        _bottomTable.Height = Scale(30);
+        _bottomTable.Height = Scale(32);
         _bottomTable.ColumnStyles[0].Width = Scale(20);
-        _bottomTable.ColumnStyles[2].Width = Scale(44);
+        _bottomTable.ColumnStyles[2].Width = Scale(48);
 
-        _slider.Height = Scale(30);
+        _slider.Height = Scale(32);
         Height = Scale(56);
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
     {
-        Color bg = _isDarkMode ? Color.FromArgb(32, 32, 33) : Color.FromArgb(243, 243, 243);
-        if (DwmInterop.IsHighContrast())
-        {
-            bg = SystemColors.Window;
-        }
+        Color bg = DwmInterop.IsHighContrast() ? SystemColors.Window : Theme.BackgroundBase(_isDarkMode);
         e.Graphics.Clear(bg);
 
         if (_isRowHovered)
@@ -474,32 +480,15 @@ public sealed class MonitorRowControl : Panel
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            int radius = Math.Max(2, Scale(6));
+            int radius = Theme.Radius8(DpiScale);
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
 
-            using var path = CreateRoundedRectanglePath(rect, radius);
+            using var path = Theme.CreateRoundedRectanglePath(rect, radius);
             if (_cachedHoverBrush != null)
             {
                 g.FillPath(_cachedHoverBrush, path);
             }
         }
-    }
-
-    private static GraphicsPath CreateRoundedRectanglePath(Rectangle rect, int radius)
-    {
-        var path = new GraphicsPath();
-        int diameter = radius * 2;
-        var arc = new Rectangle(rect.Location, new Size(diameter, diameter));
-
-        path.AddArc(arc, 180, 90);
-        arc.X = rect.Right - diameter;
-        path.AddArc(arc, 270, 90);
-        arc.Y = rect.Bottom - diameter;
-        path.AddArc(arc, 0, 90);
-        arc.X = rect.Left;
-        path.AddArc(arc, 90, 90);
-        path.CloseFigure();
-        return path;
     }
 
     public void UpdateTheme(bool isDark, bool isMica, Color accentColor)
@@ -508,22 +497,21 @@ public sealed class MonitorRowControl : Panel
         _isMicaActive = isMica;
         _accentColor = accentColor;
 
-        Color secondaryColor = FluentTypography.GetSecondaryTextColor(isDark);
-        Color primaryColor = FluentTypography.GetPrimaryTextColor(isDark);
+        Color secondaryColor = Theme.TextSecondary(isDark);
+        Color primaryColor = Theme.TextPrimary(isDark);
+        Color lowContrastColor = Theme.TextLowContrast(isDark);
 
-        _monitorGlyph.UpdateTheme(isDark, isMica, secondaryColor);
+        Color iconColor = _isRowHovered ? primaryColor : lowContrastColor;
+        _monitorGlyph.UpdateTheme(isDark, isMica, iconColor);
         _nameLabel.UpdateTheme(isDark, isMica, secondaryColor);
-        _pencilButton.UpdateTheme(isDark, isMica, secondaryColor);
-        _brightnessGlyph.UpdateTheme(isDark, isMica, secondaryColor);
+        _pencilButton.UpdateTheme(isDark, isMica, iconColor);
+        _brightnessGlyph.UpdateTheme(isDark, isMica, iconColor);
         _percentLabel.UpdateTheme(isDark, isMica, primaryColor);
 
         _softwareBadge?.UpdateTheme(isDark, isMica);
         _slider.UpdateTheme(isDark, isMica, accentColor);
 
-        Color highlightColor = isDark
-            ? Color.FromArgb(12, 255, 255, 255)
-            : Color.FromArgb(10, 0, 0, 0);
-
+        Color highlightColor = Theme.HoverOverlay(isDark);
         _cachedHoverBrush?.Dispose();
         _cachedHoverBrush = new SolidBrush(highlightColor);
 
@@ -532,7 +520,7 @@ public sealed class MonitorRowControl : Panel
 
     private void OnSliderValueChanged(object? sender, int value)
     {
-        // Instant UI feedback with tabular number formatting
+        // Instant optimistic feedback with tabular number formatting
         _percentLabel.Text = $"{value}%";
 
         if (_isUpdatingUI)

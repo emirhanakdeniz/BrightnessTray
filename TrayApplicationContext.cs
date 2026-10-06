@@ -303,7 +303,14 @@ public sealed class TrayApplicationContext : ApplicationContext
                 }
             }
 
-            _uiSyncContext?.Post(_ => ApplyTooltipText(), null);
+            _uiSyncContext?.Post(_ =>
+            {
+                ApplyTooltipText();
+                if (!_disposed)
+                {
+                    _flyoutForm.SeedMonitors(monitors);
+                }
+            }, null);
 
             // Restore saved brightness values
             var settings = _settingsService.GetSettings();

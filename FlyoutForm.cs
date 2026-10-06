@@ -28,8 +28,8 @@ public sealed class FlyoutForm : Form
     private bool _isRefreshing;
     private bool _disposed;
 
-    // Animation state
-    private readonly System.Windows.Forms.Timer _animTimer;
+    // Animation state - only created and running during active animation
+    private System.Windows.Forms.Timer? _animTimer;
     private readonly Stopwatch _animStopwatch = new();
     private bool _isAnimating;
     private bool _isClosing;
@@ -39,7 +39,8 @@ public sealed class FlyoutForm : Form
     private double _animTargetOpacity;
     private double _animDurationMs;
 
-    public int Scale(int pixels) => (int)Math.Round(pixels * (DeviceDpi / 96f));
+    public float DpiScale => DeviceDpi / 96f;
+    public int Scale(int pixels) => BrightnessTray.UI.Theme.Scale(pixels, DpiScale);
 
     public bool IsShowingOrVisible => Visible || _isAnimating;
 
@@ -82,15 +83,11 @@ public sealed class FlyoutForm : Form
             Dock = DockStyle.Fill,
             BackColor = Color.Transparent,
             Margin = Padding.Empty,
-            Padding = new Padding(Scale(16)),
+            Padding = new Padding(BrightnessTray.UI.Theme.Space16(DpiScale)),
             TabStop = false
         };
 
         Controls.Add(_contentContainer);
-
-        // Animation timer targeting ~60fps
-        _animTimer = new System.Windows.Forms.Timer { Interval = 15 };
-        _animTimer.Tick += OnAnimTimerTick;
 
         // Initial default bounds
         UpdateFormBounds(0);
@@ -114,19 +111,20 @@ public sealed class FlyoutForm : Form
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
-        _contentContainer.Padding = new Padding(Scale(16));
+        _contentContainer.Padding = new Padding(BrightnessTray.UI.Theme.Space16(DpiScale));
 
         var table = _contentContainer.Controls.OfType<TableLayoutPanel>().FirstOrDefault();
         if (table != null)
         {
             int count = table.RowCount;
+            int rowHeight = Scale(60);
+            int rowSpacing = BrightnessTray.UI.Theme.Space12(DpiScale);
             for (int i = 0; i < count; i++)
             {
-                int rowSpacing = (i < count - 1) ? Scale(12) : 0;
-                int rowHeight = Scale(56) + rowSpacing;
+                int currentSpacing = (i < count - 1) ? rowSpacing : 0;
                 if (i < table.RowStyles.Count)
                 {
-                    table.RowStyles[i].Height = rowHeight;
+                    table.RowStyles[i].Height = rowHeight + currentSpacing;
                 }
             }
         }
@@ -196,7 +194,7 @@ public sealed class FlyoutForm : Form
         }
         else
         {
-            BackColor = isDark ? Color.FromArgb(32, 32, 33) : Color.FromArgb(243, 243, 243);
+            BackColor = BrightnessTray.UI.Theme.BackgroundBase(isDark);
         }
         Debug.WriteLine($"[FlyoutForm] Mica unavailable or disabled. Using solid theme-aware background fallback ({BackColor}).");
     }
@@ -316,7 +314,7 @@ public sealed class FlyoutForm : Form
         return elapsedSec > 0.20; // 200ms guard window prevents click-away reopen loop
     }
 
-    public async void ShowFlyout(NotifyIcon? notifyIcon = null)
+    public void ShowFlyout(NotifyIcon? notifyIcon = null)
     {
         if (notifyIcon != null)
         {
@@ -335,14 +333,14 @@ public sealed class FlyoutForm : Form
 
         if (!AnimationInterop.IsAnimationEnabled())
         {
-            _animTimer.Stop();
+            StopAndDisposeAnimTimer();
             _isAnimating = false;
             _isClosing = false;
             Opacity = 1.0;
             Location = targetLocation;
             Show();
             Activate();
-            await RefreshMonitorsAsync();
+            _ = RefreshMonitorsAsync();
             return;
         }
 
@@ -357,7 +355,7 @@ public sealed class FlyoutForm : Form
         }
 
         StartOpenAnimation(targetLocation, startLocation);
-        await RefreshMonitorsAsync();
+        _ = RefreshMonitorsAsync();
     }
 
     public void CloseFlyout()
@@ -371,7 +369,7 @@ public sealed class FlyoutForm : Form
 
         if (!AnimationInterop.IsAnimationEnabled())
         {
-            _animTimer.Stop();
+            StopAndDisposeAnimTimer();
             _isAnimating = false;
             _isClosing = false;
             Hide();
@@ -385,6 +383,7 @@ public sealed class FlyoutForm : Form
 
     private void StartOpenAnimation(Point targetLocation, Point startLocation)
     {
+        StopAndDisposeAnimTimer();
         _isClosing = false;
         _animStartLocation = _isAnimating ? Location : startLocation;
         _animTargetLocation = targetLocation;
@@ -394,11 +393,15 @@ public sealed class FlyoutForm : Form
 
         _animStopwatch.Restart();
         _isAnimating = true;
+
+        _animTimer = new System.Windows.Forms.Timer { Interval = 15 };
+        _animTimer.Tick += OnAnimTimerTick;
         _animTimer.Start();
     }
 
     private void StartCloseAnimation(Point targetLocation)
     {
+        StopAndDisposeAnimTimer();
         _isClosing = true;
         _animStartLocation = Location;
         _animTargetLocation = targetLocation;
@@ -408,7 +411,21 @@ public sealed class FlyoutForm : Form
 
         _animStopwatch.Restart();
         _isAnimating = true;
+
+        _animTimer = new System.Windows.Forms.Timer { Interval = 15 };
+        _animTimer.Tick += OnAnimTimerTick;
         _animTimer.Start();
+    }
+
+    private void StopAndDisposeAnimTimer()
+    {
+        if (_animTimer != null)
+        {
+            _animTimer.Stop();
+            _animTimer.Tick -= OnAnimTimerTick;
+            _animTimer.Dispose();
+            _animTimer = null;
+        }
     }
 
     private void OnAnimTimerTick(object? sender, EventArgs e)
@@ -429,7 +446,7 @@ public sealed class FlyoutForm : Form
 
         if (t >= 1.0)
         {
-            _animTimer.Stop();
+            StopAndDisposeAnimTimer();
             _isAnimating = false;
 
             if (_isClosing)
@@ -505,6 +522,96 @@ public sealed class FlyoutForm : Form
         });
     }
 
+    public void SeedMonitors(IReadOnlyList<MonitorInfo> monitors)
+    {
+        if (monitors.Count == 0 || _disposed || IsDisposed)
+        {
+            return;
+        }
+
+        var existingRows = _contentContainer.Controls.OfType<TableLayoutPanel>()
+            .SelectMany(t => t.Controls.OfType<MonitorRowControl>())
+            .ToList();
+
+        bool matchesExisting = existingRows.Count == monitors.Count &&
+            existingRows.Select(r => r.MonitorId).SequenceEqual(monitors.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
+
+        if (matchesExisting)
+        {
+            for (int i = 0; i < monitors.Count; i++)
+            {
+                existingRows[i].UpdateBrightness(monitors[i].CurrentPercent);
+            }
+            return;
+        }
+
+        BuildMonitorRows(monitors);
+    }
+
+    private void BuildMonitorRows(IReadOnlyList<MonitorInfo> monitors)
+    {
+        _contentContainer.SuspendLayout();
+        try
+        {
+            ClearContent();
+
+            bool isDark = !DwmInterop.IsAppsUseLightTheme();
+            Color accentColor = DwmInterop.GetAccentColor();
+
+            var table = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = monitors.Count,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+                TabStop = false
+            };
+
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+            int rowHeight = Scale(60);
+            int rowSpacing = BrightnessTray.UI.Theme.Space12(DpiScale);
+
+            for (int i = 0; i < monitors.Count; i++)
+            {
+                int currentSpacing = (i < monitors.Count - 1) ? rowSpacing : 0;
+                table.RowStyles.Add(new RowStyle(SizeType.Absolute, rowHeight + currentSpacing));
+
+                int displayIndex = i + 1;
+                var row = new MonitorRowControl(
+                    monitors[i],
+                    displayIndex,
+                    _brightnessService,
+                    _settingsService,
+                    onEditingStateChanged: isEditing =>
+                    {
+                        if (isEditing) _activeEditingCount++;
+                        else _activeEditingCount = Math.Max(0, _activeEditingCount - 1);
+                    },
+                    onRenamed: (monitorId, newName) =>
+                    {
+                        MonitorRenamed?.Invoke(monitorId, newName);
+                    })
+                {
+                    Dock = DockStyle.Fill,
+                    Margin = new Padding(0, 0, 0, currentSpacing)
+                };
+                row.UpdateTheme(isDark, _isMicaActive, accentColor);
+                table.Controls.Add(row, 0, i);
+            }
+
+            _contentContainer.Controls.Add(table);
+        }
+        finally
+        {
+            _contentContainer.ResumeLayout(true);
+        }
+
+        UpdateFormBounds(monitors.Count);
+    }
+
     public async Task RefreshMonitorsAsync()
     {
         if (_isRefreshing)
@@ -524,23 +631,27 @@ public sealed class FlyoutForm : Form
                 return;
             }
 
-            if (monitors.Count == 0)
-            {
-                ShowEmptyState();
-                return;
-            }
-
-            // Check if existing rows already match current monitors
             var existingRows = _contentContainer.Controls.OfType<TableLayoutPanel>()
                 .SelectMany(t => t.Controls.OfType<MonitorRowControl>())
                 .ToList();
 
+            if (monitors.Count == 0)
+            {
+                // Silently keep existing cached rows if available, never show empty state during a refresh
+                if (existingRows.Count == 0)
+                {
+                    ShowEmptyState();
+                }
+                return;
+            }
+
+            // Check if existing rows already match current monitors
             bool matchesExisting = existingRows.Count == monitors.Count &&
                 existingRows.Select(r => r.MonitorId).SequenceEqual(monitors.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
 
             if (matchesExisting)
             {
-                // Update brightness values in existing controls without rebuilding
+                // Update brightness values in existing controls silently without rebuilding
                 for (int i = 0; i < monitors.Count; i++)
                 {
                     existingRows[i].UpdateBrightness(monitors[i].CurrentPercent);
@@ -549,64 +660,7 @@ public sealed class FlyoutForm : Form
             }
 
             // Rebuild rows dynamically
-            _contentContainer.SuspendLayout();
-            try
-            {
-                ClearContent();
-
-                bool isDark = !DwmInterop.IsAppsUseLightTheme();
-                Color accentColor = DwmInterop.GetAccentColor();
-
-                var table = new TableLayoutPanel
-                {
-                    Dock = DockStyle.Fill,
-                    ColumnCount = 1,
-                    RowCount = monitors.Count,
-                    BackColor = Color.Transparent,
-                    Margin = Padding.Empty,
-                    Padding = Padding.Empty,
-                    TabStop = false
-                };
-
-                table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-
-                for (int i = 0; i < monitors.Count; i++)
-                {
-                    int rowSpacing = (i < monitors.Count - 1) ? Scale(12) : 0;
-                    int rowHeight = Scale(56) + rowSpacing;
-                    table.RowStyles.Add(new RowStyle(SizeType.Absolute, rowHeight));
-
-                    int displayIndex = i + 1;
-                    var row = new MonitorRowControl(
-                        monitors[i],
-                        displayIndex,
-                        _brightnessService,
-                        _settingsService,
-                        onEditingStateChanged: isEditing =>
-                        {
-                            if (isEditing) _activeEditingCount++;
-                            else _activeEditingCount = Math.Max(0, _activeEditingCount - 1);
-                        },
-                        onRenamed: (monitorId, newName) =>
-                        {
-                            MonitorRenamed?.Invoke(monitorId, newName);
-                        })
-                    {
-                        Dock = DockStyle.Fill,
-                        Margin = new Padding(0, 0, 0, rowSpacing)
-                    };
-                    row.UpdateTheme(isDark, _isMicaActive, accentColor);
-                    table.Controls.Add(row, 0, i);
-                }
-
-                _contentContainer.Controls.Add(table);
-            }
-            finally
-            {
-                _contentContainer.ResumeLayout(true);
-            }
-
-            UpdateFormBounds(monitors.Count);
+            BuildMonitorRows(monitors);
         }
         catch
         {
@@ -638,13 +692,13 @@ public sealed class FlyoutForm : Form
             var glyph = new FluentLabel
             {
                 Text = "\uE7F4", // Monitor screen glyph
-                Font = FluentTypography.CreateGlyphFont(24f),
+                Font = FluentTypography.CreateGlyphFont(BrightnessTray.UI.Theme.FontSizeGlyphLarge),
                 Dock = DockStyle.Top,
                 Height = Scale(36),
                 TextAlign = ContentAlignment.MiddleCenter,
                 TabStop = false
             };
-            glyph.UpdateTheme(isDark, _isMicaActive, FluentTypography.GetSecondaryTextColor(isDark));
+            glyph.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
 
             var title = new FluentLabel
             {
@@ -655,7 +709,7 @@ public sealed class FlyoutForm : Form
                 TextAlign = ContentAlignment.MiddleCenter,
                 TabStop = false
             };
-            title.UpdateTheme(isDark, _isMicaActive, FluentTypography.GetPrimaryTextColor(isDark));
+            title.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextPrimary(isDark));
 
             var message = new FluentLabel
             {
@@ -665,7 +719,7 @@ public sealed class FlyoutForm : Form
                 TextAlign = ContentAlignment.TopCenter,
                 TabStop = false
             };
-            message.UpdateTheme(isDark, _isMicaActive, FluentTypography.GetSecondaryTextColor(isDark));
+            message.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
 
             emptyPanel.Controls.Add(message);
             emptyPanel.Controls.Add(title);
@@ -697,13 +751,13 @@ public sealed class FlyoutForm : Form
 
         if (monitorCount == 0)
         {
-            contentHeight = Scale(16) * 2 + Scale(100);
+            contentHeight = BrightnessTray.UI.Theme.Space16(DpiScale) * 2 + Scale(100);
         }
         else
         {
-            int paddingTotal = Scale(16) * 2;
-            int rowsTotal = monitorCount * Scale(56);
-            int spacingTotal = Math.Max(0, monitorCount - 1) * Scale(12);
+            int paddingTotal = BrightnessTray.UI.Theme.Space16(DpiScale) * 2;
+            int rowsTotal = monitorCount * Scale(60);
+            int spacingTotal = Math.Max(0, monitorCount - 1) * BrightnessTray.UI.Theme.Space12(DpiScale);
             contentHeight = paddingTotal + rowsTotal + spacingTotal;
         }
 
@@ -713,7 +767,7 @@ public sealed class FlyoutForm : Form
 
     public void PositionNearTaskbar()
     {
-        int gap = Scale(12);
+        int gap = BrightnessTray.UI.Theme.Space12(DpiScale);
         Rectangle iconRect = Rectangle.Empty;
         bool hasIconRect = _notifyIcon != null && ShellInterop.TryGetNotifyIconRect(_notifyIcon, out iconRect);
 
@@ -846,8 +900,7 @@ public sealed class FlyoutForm : Form
                 _displayChangeCts?.Dispose();
                 _displayChangeCts = null;
 
-                _animTimer.Stop();
-                _animTimer.Dispose();
+                StopAndDisposeAnimTimer();
 
                 ClearContent();
                 _contentContainer.Dispose();

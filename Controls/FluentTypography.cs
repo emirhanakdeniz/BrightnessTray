@@ -76,19 +76,14 @@ public static class FluentTypography
         return new Font(GlyphFontFamilyName, sizePt, FontStyle.Regular);
     }
 
-    // Standardized Windows 11 Fluent typography sizes
-    public static Font CreateBodyFont(FontStyle style = FontStyle.Regular) => CreateFont(10.5f, style); // ~14px
-    public static Font CreateSecondaryFont(FontStyle style = FontStyle.Regular) => CreateFont(9f, style);   // ~12px
+    // Standardized Windows 11 Fluent typography sizes from Theme tokens
+    public static Font CreateBodyFont(FontStyle style = FontStyle.Regular) => CreateFont(BrightnessTray.UI.Theme.FontSizeBody, style); // ~14px
+    public static Font CreateSecondaryFont(FontStyle style = FontStyle.Regular) => CreateFont(BrightnessTray.UI.Theme.FontSizeSecondary, style);   // ~12px
     public static Font CreateBadgeFont(FontStyle style = FontStyle.Regular) => CreateFont(8f, style);       // ~10.5px
 
-    public static Color GetPrimaryTextColor(bool isDark) =>
-        isDark ? Color.FromArgb(255, 255, 255) : Color.FromArgb(26, 26, 26);
-
-    public static Color GetSecondaryTextColor(bool isDark) =>
-        isDark ? Color.FromArgb(170, 170, 170) : Color.FromArgb(94, 94, 94);
-
-    public static Color GetDisabledTextColor(bool isDark) =>
-        isDark ? Color.FromArgb(120, 120, 120) : Color.FromArgb(160, 160, 160);
+    public static Color GetPrimaryTextColor(bool isDark) => BrightnessTray.UI.Theme.TextPrimary(isDark);
+    public static Color GetSecondaryTextColor(bool isDark) => BrightnessTray.UI.Theme.TextSecondary(isDark);
+    public static Color GetDisabledTextColor(bool isDark) => BrightnessTray.UI.Theme.TextDisabled(isDark);
 
     public static void DrawText(
         Graphics g,
