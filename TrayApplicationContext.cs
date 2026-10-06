@@ -1,7 +1,7 @@
 namespace BrightnessTray;
 
+using System.Diagnostics;
 using System.Text;
-using Microsoft.Win32;
 using BrightnessTray.Native;
 using BrightnessTray.Services;
 
@@ -13,7 +13,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly SettingsService _settingsService;
     private readonly BrightnessService _brightnessService;
     private readonly FlyoutForm _flyoutForm;
-    private readonly TaskbarNotificationWindow _taskbarNotificationWindow;
+    private readonly SystemMessageListenerWindow _systemListenerWindow;
     private readonly SynchronizationContext? _uiSyncContext;
 
     private readonly object _monitorStateLock = new();
@@ -21,9 +21,13 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly Dictionary<string, string> _monitorNameMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _lastNonZeroBrightnessMap = new(StringComparer.OrdinalIgnoreCase);
 
-    private CancellationTokenSource? _systemEventDebounceCts;
-    private CancellationTokenSource? _tooltipThrottleCts;
+    // On-demand one-shot timer for tooltip updates while dragging slider
+    private System.Windows.Forms.Timer? _tooltipThrottleTimer;
     private bool _disposed;
+
+#if DEBUG
+    private bool _loggedIdleMessage;
+#endif
 
     public TrayApplicationContext()
     {
@@ -83,76 +87,68 @@ public sealed class TrayApplicationContext : ApplicationContext
         _flyoutForm.SetNotifyIcon(_notifyIcon);
         _notifyIcon.MouseClick += OnNotifyIconMouseClick;
 
-        // Listen for TaskbarCreated (when explorer.exe restarts or crashes)
-        _taskbarNotificationWindow = new TaskbarNotificationWindow(OnTaskbarCreated);
-
-        // Listen for live system theme changes and display/DPI changes
-        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
-        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        // Top-level hidden native window listening for OS broadcasts (theme, display change, taskbar recreate, resume from sleep)
+        _systemListenerWindow = new SystemMessageListenerWindow();
+        _systemListenerWindow.ThemeOrColorChanged += OnThemeOrColorChanged;
+        _systemListenerWindow.DisplayChanged += OnDisplayChanged;
+        _systemListenerWindow.TaskbarCreated += OnTaskbarCreated;
+        _systemListenerWindow.ResumedFromSleep += OnResumedFromSleep;
 
         // Listen for brightness adjustments to throttle tooltip updates
         _brightnessService.BrightnessChanged += OnBrightnessChanged;
 
         // Restore saved brightness values and initialize tooltip status
         _ = Task.Run(StartupInitializationAsync);
-    }
 
-    private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
-    {
-        if (e.Category == UserPreferenceCategory.General || e.Category == UserPreferenceCategory.Color)
+#if DEBUG
+        Application.Idle += (s, e) =>
         {
-            DebounceSystemEvent(recreateTrayIcon: false);
-        }
+            if (!_loggedIdleMessage)
+            {
+                _loggedIdleMessage = true;
+                Debug.WriteLine("[IdleWatchdog] Message loop drained. Main thread is blocked waiting for OS events.");
+            }
+        };
+#endif
     }
 
-    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    private void OnThemeOrColorChanged()
     {
-        DebounceSystemEvent(recreateTrayIcon: false);
+        if (_disposed) return;
+#if DEBUG
+        _loggedIdleMessage = false;
+#endif
+        RefreshTrayIcon(recreateTrayIcon: false);
+        _flyoutForm.OnThemeOrColorChanged();
+    }
+
+    private void OnDisplayChanged()
+    {
+        if (_disposed) return;
+#if DEBUG
+        _loggedIdleMessage = false;
+#endif
+        RefreshTrayIcon(recreateTrayIcon: false);
+        _flyoutForm.OnDisplayConfigurationChanged();
+        _ = Task.Run(StartupInitializationAsync);
     }
 
     private void OnTaskbarCreated()
     {
-        // When explorer.exe restarts, the tray icon needs to be recreated and re-added
-        DebounceSystemEvent(recreateTrayIcon: true);
+        if (_disposed) return;
+#if DEBUG
+        _loggedIdleMessage = false;
+#endif
+        RefreshTrayIcon(recreateTrayIcon: true);
     }
 
-    private void DebounceSystemEvent(bool recreateTrayIcon)
+    private void OnResumedFromSleep()
     {
-        _systemEventDebounceCts?.Cancel();
-        _systemEventDebounceCts?.Dispose();
-        _systemEventDebounceCts = new CancellationTokenSource();
-
-        var token = _systemEventDebounceCts.Token;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                // Debounce ~200ms to settle event bursts from Windows
-                await Task.Delay(200, token).ConfigureAwait(false);
-
-                if (token.IsCancellationRequested || _disposed)
-                {
-                    return;
-                }
-
-                _uiSyncContext?.Post(_ =>
-                {
-                    if (!_disposed)
-                    {
-                        RefreshTrayIcon(recreateTrayIcon);
-                    }
-                }, null);
-            }
-            catch (OperationCanceledException)
-            {
-                // Superseded by newer event in burst
-            }
-            catch
-            {
-                // Fail silently
-            }
-        });
+        if (_disposed) return;
+#if DEBUG
+        _loggedIdleMessage = false;
+#endif
+        _ = Task.Run(StartupInitializationAsync);
     }
 
     private void RefreshTrayIcon(bool recreateTrayIcon)
@@ -191,41 +187,39 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void ThrottleTooltipUpdate()
     {
-        _tooltipThrottleCts?.Cancel();
-        _tooltipThrottleCts?.Dispose();
-        _tooltipThrottleCts = new CancellationTokenSource();
+        if (_disposed) return;
 
-        var token = _tooltipThrottleCts.Token;
-
-        _ = Task.Run(async () =>
+        if (_tooltipThrottleTimer == null)
         {
-            try
-            {
-                // Throttle tooltip updates to ~150ms while user is dragging
-                await Task.Delay(150, token).ConfigureAwait(false);
+            _tooltipThrottleTimer = new System.Windows.Forms.Timer { Interval = 150 };
+            _tooltipThrottleTimer.Tick += OnTooltipThrottleTick;
+        }
+        else
+        {
+            _tooltipThrottleTimer.Stop();
+        }
 
-                if (token.IsCancellationRequested || _disposed)
-                {
-                    return;
-                }
+        _tooltipThrottleTimer.Start();
+    }
 
-                _uiSyncContext?.Post(_ =>
-                {
-                    if (!_disposed)
-                    {
-                        ApplyTooltipText();
-                    }
-                }, null);
-            }
-            catch (OperationCanceledException)
-            {
-                // Throttled
-            }
-            catch
-            {
-                // Fail silently
-            }
-        });
+    private void OnTooltipThrottleTick(object? sender, EventArgs e)
+    {
+        StopAndDisposeTooltipTimer();
+        if (!_disposed)
+        {
+            ApplyTooltipText();
+        }
+    }
+
+    private void StopAndDisposeTooltipTimer()
+    {
+        if (_tooltipThrottleTimer != null)
+        {
+            _tooltipThrottleTimer.Stop();
+            _tooltipThrottleTimer.Tick -= OnTooltipThrottleTick;
+            _tooltipThrottleTimer.Dispose();
+            _tooltipThrottleTimer = null;
+        }
     }
 
     private void OnMonitorRenamed(string monitorId, string newDisplayName)
@@ -345,6 +339,9 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OnNotifyIconMouseClick(object? sender, MouseEventArgs e)
     {
+#if DEBUG
+        _loggedIdleMessage = false;
+#endif
         if (e.Button == MouseButtons.Left)
         {
             ToggleFlyout();
@@ -531,18 +528,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             if (disposing)
             {
-                SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
-                SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
-
                 _brightnessService.BrightnessChanged -= OnBrightnessChanged;
 
-                _systemEventDebounceCts?.Cancel();
-                _systemEventDebounceCts?.Dispose();
-
-                _tooltipThrottleCts?.Cancel();
-                _tooltipThrottleCts?.Dispose();
-
-                _taskbarNotificationWindow.Dispose();
+                StopAndDisposeTooltipTimer();
+                _systemListenerWindow.Dispose();
 
                 if (_notifyIcon is not null)
                 {

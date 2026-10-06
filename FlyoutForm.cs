@@ -1,7 +1,6 @@
 namespace BrightnessTray;
 
 using System.Diagnostics;
-using Microsoft.Win32;
 using BrightnessTray.Controls;
 using BrightnessTray.Native;
 using BrightnessTray.Services;
@@ -24,7 +23,6 @@ public sealed class FlyoutForm : Form
     private BackdropKind _currentBackdrop = BackdropKind.Mica;
     private bool _isMicaActive;
     private long _lastClosedTimestamp;
-    private CancellationTokenSource? _displayChangeCts;
     private bool _isRefreshing;
     private bool _disposed;
 
@@ -91,10 +89,6 @@ public sealed class FlyoutForm : Form
 
         // Initial default bounds
         UpdateFormBounds(0);
-
-        // Listen for system theme and display connect/disconnect events
-        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
-        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
     }
 
     public void SetNotifyIcon(NotifyIcon notifyIcon)
@@ -199,14 +193,11 @@ public sealed class FlyoutForm : Form
         Debug.WriteLine($"[FlyoutForm] Mica unavailable or disabled. Using solid theme-aware background fallback ({BackColor}).");
     }
 
-    private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    public void OnThemeOrColorChanged()
     {
-        if (e.Category == UserPreferenceCategory.General || e.Category == UserPreferenceCategory.Color)
+        if (IsHandleCreated && !IsDisposed)
         {
-            if (IsHandleCreated && !IsDisposed)
-            {
-                BeginInvoke(ApplyThemeAndBackdrop);
-            }
+            ApplyThemeAndBackdrop();
         }
     }
 
@@ -479,47 +470,12 @@ public sealed class FlyoutForm : Form
         };
     }
 
-    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    public void OnDisplayConfigurationChanged()
     {
-        // Cancel any pending debounce timer
-        _displayChangeCts?.Cancel();
-        _displayChangeCts?.Dispose();
-        _displayChangeCts = new CancellationTokenSource();
-
-        var token = _displayChangeCts.Token;
-
-        _ = Task.Run(async () =>
+        if (IsHandleCreated && !IsDisposed && Visible)
         {
-            try
-            {
-                // Wait 1200ms to allow Windows display driver and DDC/CI / WMI bus to settle
-                await Task.Delay(1200, token).ConfigureAwait(false);
-
-                if (token.IsCancellationRequested || _disposed)
-                {
-                    return;
-                }
-
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke(async () =>
-                    {
-                        if (Visible)
-                        {
-                            await RefreshMonitorsAsync();
-                        }
-                    });
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Superseded by newer display settings event
-            }
-            catch
-            {
-                // Fail silently
-            }
-        });
+            _ = RefreshMonitorsAsync();
+        }
     }
 
     public void SeedMonitors(IReadOnlyList<MonitorInfo> monitors)
@@ -893,13 +849,6 @@ public sealed class FlyoutForm : Form
         {
             if (disposing)
             {
-                SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
-                SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
-
-                _displayChangeCts?.Cancel();
-                _displayChangeCts?.Dispose();
-                _displayChangeCts = null;
-
                 StopAndDisposeAnimTimer();
 
                 ClearContent();
