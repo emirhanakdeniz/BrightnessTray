@@ -41,11 +41,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         _uiSyncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settingsService = new SettingsService();
 
-        // Composite provider combining laptop internal panels (WMI) and external displays (DDC/CI)
-        _brightnessProvider = new CompositeBrightnessProvider(
-            new WmiProvider(),
-            new DdcCiProvider()
-        );
+        // Detect internal laptop displays via Win32 CCD API to avoid loading WMI/System.Management on desktop PCs
+        var ddcCiProvider = new DdcCiProvider();
+        _brightnessProvider = DisplayConfigInterop.HasInternalDisplay()
+            ? new CompositeBrightnessProvider(new WmiProvider(), ddcCiProvider)
+            : ddcCiProvider;
 
         _brightnessService = new BrightnessService(_brightnessProvider, _settingsService);
 

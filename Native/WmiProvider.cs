@@ -4,7 +4,7 @@ using System.Management;
 
 public class WmiProvider : IBrightnessProvider
 {
-    private static readonly ManagementScope WmiScope = new(@"root\WMI");
+    private readonly ManagementScope _wmiScope = new(@"root\WMI");
 
     public IReadOnlyList<MonitorInfo> GetMonitors()
     {
@@ -12,7 +12,7 @@ public class WmiProvider : IBrightnessProvider
 
         try
         {
-            using var searcher = new ManagementObjectSearcher(WmiScope, new SelectQuery("WmiMonitorBrightness"));
+            using var searcher = new ManagementObjectSearcher(_wmiScope, new SelectQuery("WmiMonitorBrightness"));
             using var results = searcher.Get();
 
             var names = GetFriendlyNames();
@@ -73,7 +73,7 @@ public class WmiProvider : IBrightnessProvider
 
         try
         {
-            using var searcher = new ManagementObjectSearcher(WmiScope, new SelectQuery("WmiMonitorBrightnessMethods"));
+            using var searcher = new ManagementObjectSearcher(_wmiScope, new SelectQuery("WmiMonitorBrightnessMethods"));
             using var results = searcher.Get();
 
             foreach (ManagementObject mo in results)
@@ -105,13 +105,13 @@ public class WmiProvider : IBrightnessProvider
         return false;
     }
 
-    private static Dictionary<string, string> GetFriendlyNames()
+    private Dictionary<string, string> GetFriendlyNames()
     {
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
-            using var searcher = new ManagementObjectSearcher(WmiScope, new SelectQuery("WmiMonitorID"));
+            using var searcher = new ManagementObjectSearcher(_wmiScope, new SelectQuery("WmiMonitorID"));
             using var results = searcher.Get();
 
             foreach (ManagementObject mo in results)
