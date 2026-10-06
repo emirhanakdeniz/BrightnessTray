@@ -9,7 +9,7 @@ public sealed class FluentBadge : Control
     private bool _isDarkMode = true;
     private bool _isMicaActive;
 
-    public FluentBadge(string text = "Software")
+    public FluentBadge(string text = "Software", Font? font = null)
     {
         Text = text;
 
@@ -21,7 +21,7 @@ public sealed class FluentBadge : Control
             ControlStyles.SupportsTransparentBackColor, true);
 
         BackColor = Color.Transparent;
-        Font = FluentTypography.CreateBadgeFont();
+        Font = font ?? FluentTypography.CreateBadgeFont();
         UpdateSize();
     }
 

@@ -12,14 +12,21 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly IBrightnessProvider _brightnessProvider;
     private readonly SettingsService _settingsService;
     private readonly BrightnessService _brightnessService;
-    private readonly FlyoutForm _flyoutForm;
     private readonly SystemMessageListenerWindow _systemListenerWindow;
     private readonly SynchronizationContext? _uiSyncContext;
+
+    private FlyoutForm? _flyoutForm;
+    private System.Windows.Forms.Timer? _flyoutDisposeTimer;
 
     private readonly object _monitorStateLock = new();
     private readonly Dictionary<string, int> _monitorBrightnessMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _monitorNameMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _lastNonZeroBrightnessMap = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<MonitorInfo> _cachedMonitors = Array.Empty<MonitorInfo>();
+
+    private bool? _currentIconIsLight;
+    private int _currentIconDpi;
+    private string _lastTooltipText = "";
 
     // On-demand one-shot timer for tooltip updates while dragging slider
     private System.Windows.Forms.Timer? _tooltipThrottleTimer;
@@ -41,8 +48,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         );
 
         _brightnessService = new BrightnessService(_brightnessProvider, _settingsService);
-        _flyoutForm = new FlyoutForm(_brightnessProvider, _brightnessService, _settingsService);
-        _flyoutForm.MonitorRenamed += OnMonitorRenamed;
 
         _contextMenu = new ContextMenuStrip();
 
@@ -75,6 +80,8 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         int dpi = IconRenderer.GetTaskbarDpi();
         bool isLight = IconRenderer.IsSystemTaskbarLight();
+        _currentIconIsLight = isLight;
+        _currentIconDpi = dpi;
 
         _notifyIcon = new NotifyIcon
         {
@@ -83,8 +90,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = _contextMenu,
             Visible = true
         };
+        _lastTooltipText = "BrightnessTray";
 
-        _flyoutForm.SetNotifyIcon(_notifyIcon);
         _notifyIcon.MouseClick += OnNotifyIconMouseClick;
 
         // Top-level hidden native window listening for OS broadcasts (theme, display change, taskbar recreate, resume from sleep)
@@ -119,7 +126,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         _loggedIdleMessage = false;
 #endif
         RefreshTrayIcon(recreateTrayIcon: false);
-        _flyoutForm.OnThemeOrColorChanged();
+        if (_flyoutForm != null && !_flyoutForm.IsDisposed)
+        {
+            _flyoutForm.OnThemeOrColorChanged();
+        }
     }
 
     private void OnDisplayChanged()
@@ -129,7 +139,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         _loggedIdleMessage = false;
 #endif
         RefreshTrayIcon(recreateTrayIcon: false);
-        _flyoutForm.OnDisplayConfigurationChanged();
+        if (_flyoutForm != null && !_flyoutForm.IsDisposed)
+        {
+            _flyoutForm.OnDisplayConfigurationChanged();
+        }
         _ = Task.Run(StartupInitializationAsync);
     }
 
@@ -157,6 +170,14 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             bool isLight = IconRenderer.IsSystemTaskbarLight();
             int dpi = IconRenderer.GetTaskbarDpi();
+
+            if (!recreateTrayIcon && _currentIconIsLight == isLight && _currentIconDpi == dpi && _notifyIcon.Icon != null)
+            {
+                return;
+            }
+
+            _currentIconIsLight = isLight;
+            _currentIconDpi = dpi;
 
             var oldIcon = _notifyIcon.Icon;
             _notifyIcon.Icon = IconRenderer.CreateBrightnessIcon(isLight, dpi);
@@ -245,8 +266,12 @@ public sealed class TrayApplicationContext : ApplicationContext
                 count = _monitorBrightnessMap.Count;
                 if (count == 1)
                 {
-                    singleId = _monitorBrightnessMap.Keys.First();
-                    singlePercent = _monitorBrightnessMap[singleId];
+                    foreach (var pair in _monitorBrightnessMap)
+                    {
+                        singleId = pair.Key;
+                        singlePercent = pair.Value;
+                        break;
+                    }
                     _monitorNameMap.TryGetValue(singleId, out singleName);
                 }
             }
@@ -272,6 +297,12 @@ public sealed class TrayApplicationContext : ApplicationContext
                 text = text[..127];
             }
 
+            if (string.Equals(_lastTooltipText, text, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastTooltipText = text;
             _notifyIcon.Text = text;
         }
         catch
@@ -288,19 +319,21 @@ public sealed class TrayApplicationContext : ApplicationContext
 
             lock (_monitorStateLock)
             {
+                _cachedMonitors = monitors;
                 _monitorBrightnessMap.Clear();
                 _monitorNameMap.Clear();
-                foreach (var monitor in monitors)
+                for (int i = 0; i < monitors.Count; i++)
                 {
-                    _monitorBrightnessMap[monitor.Id] = monitor.CurrentPercent;
-                    _monitorNameMap[monitor.Id] = monitor.Name;
+                    var m = monitors[i];
+                    _monitorBrightnessMap[m.Id] = m.CurrentPercent;
+                    _monitorNameMap[m.Id] = m.Name;
                 }
             }
 
             _uiSyncContext?.Post(_ =>
             {
                 ApplyTooltipText();
-                if (!_disposed)
+                if (!_disposed && _flyoutForm != null && !_flyoutForm.IsDisposed)
                 {
                     _flyoutForm.SeedMonitors(monitors);
                 }
@@ -310,8 +343,9 @@ public sealed class TrayApplicationContext : ApplicationContext
             var settings = _settingsService.GetSettings();
             if (settings.MonitorBrightness.Count > 0)
             {
-                foreach (var monitor in monitors)
+                for (int i = 0; i < monitors.Count; i++)
                 {
+                    var monitor = monitors[i];
                     if (settings.MonitorBrightness.TryGetValue(monitor.Id, out int savedPercent))
                     {
                         if (savedPercent != monitor.CurrentPercent)
@@ -354,13 +388,93 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void ToggleFlyout()
     {
-        if (_flyoutForm.IsShowingOrVisible)
+        StopAndDisposeFlyoutDisposeTimer();
+
+        if (_flyoutForm != null && _flyoutForm.IsShowingOrVisible)
         {
             _flyoutForm.CloseFlyout();
+            return;
         }
-        else if (_flyoutForm.CanReopen())
+
+        if (_flyoutForm != null && !_flyoutForm.CanReopen())
         {
-            _flyoutForm.ShowFlyout(_notifyIcon);
+            return;
+        }
+
+        EnsureFlyoutFormCreated();
+        _flyoutForm!.ShowFlyout(_notifyIcon);
+    }
+
+    private void EnsureFlyoutFormCreated()
+    {
+        if (_flyoutForm == null || _flyoutForm.IsDisposed)
+        {
+            long start = Stopwatch.GetTimestamp();
+            _flyoutForm = new FlyoutForm(_brightnessProvider, _brightnessService, _settingsService);
+            _flyoutForm.SetNotifyIcon(_notifyIcon);
+            _flyoutForm.MonitorRenamed += OnMonitorRenamed;
+            _flyoutForm.FlyoutClosed += OnFlyoutClosed;
+
+            IReadOnlyList<MonitorInfo> monitorsToSeed;
+            lock (_monitorStateLock)
+            {
+                monitorsToSeed = _cachedMonitors;
+            }
+
+            if (monitorsToSeed.Count > 0)
+            {
+                _flyoutForm.SeedMonitors(monitorsToSeed);
+            }
+
+            long elapsedMs = (Stopwatch.GetTimestamp() - start) * 1000 / Stopwatch.Frequency;
+            Debug.WriteLine($"[FlyoutLifecycle] Created FlyoutForm in {elapsedMs} ms");
+        }
+    }
+
+    private void OnFlyoutClosed()
+    {
+        if (_disposed) return;
+        _settingsService.Flush();
+        StartFlyoutDisposeTimer();
+    }
+
+    private void StartFlyoutDisposeTimer()
+    {
+        StopAndDisposeFlyoutDisposeTimer();
+        _flyoutDisposeTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+        _flyoutDisposeTimer.Tick += OnFlyoutDisposeTimerTick;
+        _flyoutDisposeTimer.Start();
+    }
+
+    private void StopAndDisposeFlyoutDisposeTimer()
+    {
+        if (_flyoutDisposeTimer != null)
+        {
+            _flyoutDisposeTimer.Stop();
+            _flyoutDisposeTimer.Tick -= OnFlyoutDisposeTimerTick;
+            _flyoutDisposeTimer.Dispose();
+            _flyoutDisposeTimer = null;
+        }
+    }
+
+    private void OnFlyoutDisposeTimerTick(object? sender, EventArgs e)
+    {
+        StopAndDisposeFlyoutDisposeTimer();
+        if (_disposed) return;
+
+        if (_flyoutForm != null && !_flyoutForm.IsShowingOrVisible)
+        {
+            _flyoutForm.MonitorRenamed -= OnMonitorRenamed;
+            _flyoutForm.FlyoutClosed -= OnFlyoutClosed;
+            _flyoutForm.Dispose();
+            _flyoutForm = null;
+
+            GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
+            MemoryInterop.TrimWorkingSet();
+
+#if DEBUG
+            Debug.WriteLine("[FlyoutLifecycle] FlyoutForm disposed after 5s idle; memory trimmed.");
+#endif
         }
     }
 
@@ -374,10 +488,19 @@ public sealed class TrayApplicationContext : ApplicationContext
                 if (monitors.Count == 0) return;
 
                 // Check if any monitor currently has brightness > 0
-                bool anyAboveZero = monitors.Any(m => m.CurrentPercent > 0);
-
-                foreach (var monitor in monitors)
+                bool anyAboveZero = false;
+                for (int i = 0; i < monitors.Count; i++)
                 {
+                    if (monitors[i].CurrentPercent > 0)
+                    {
+                        anyAboveZero = true;
+                        break;
+                    }
+                }
+
+                for (int i = 0; i < monitors.Count; i++)
+                {
+                    var monitor = monitors[i];
                     int targetPercent;
                     if (anyAboveZero)
                     {
@@ -403,7 +526,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 // Update flyout controls if currently open
                 _uiSyncContext?.Post(_ =>
                 {
-                    if (_flyoutForm.Visible)
+                    if (_flyoutForm != null && !_flyoutForm.IsDisposed && _flyoutForm.Visible)
                     {
                         _ = _flyoutForm.RefreshMonitorsAsync();
                     }
@@ -435,8 +558,9 @@ public sealed class TrayApplicationContext : ApplicationContext
             var sb = new StringBuilder();
             sb.AppendLine($"Detected {monitors.Count} display(s):\n");
 
-            foreach (var monitor in monitors)
+            for (int i = 0; i < monitors.Count; i++)
             {
+                var monitor = monitors[i];
                 sb.AppendLine($"• {monitor.Name}");
                 sb.AppendLine($"  ID: {monitor.Id}");
                 sb.AppendLine($"  Brightness: {monitor.CurrentPercent}% (raw: {monitor.CurrentBrightness}, min: {monitor.MinBrightness}, max: {monitor.MaxBrightness})");
@@ -468,9 +592,9 @@ public sealed class TrayApplicationContext : ApplicationContext
                 var monitors = _brightnessProvider.GetMonitors();
                 int success = 0;
 
-                foreach (var monitor in monitors)
+                for (int i = 0; i < monitors.Count; i++)
                 {
-                    if (_brightnessProvider.TrySetBrightness(monitor.Id, 50))
+                    if (_brightnessProvider.TrySetBrightness(monitors[i].Id, 50))
                     {
                         success++;
                     }
@@ -518,8 +642,86 @@ public sealed class TrayApplicationContext : ApplicationContext
             _notifyIcon.Visible = false;
         }
 
-        _flyoutForm.Hide();
+        _flyoutForm?.Hide();
         ExitThread();
+    }
+
+    internal void RunLifecycleTest()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("=== Memory & Object Lifetime Diagnostic ===");
+        var proc = Process.GetCurrentProcess();
+        proc.Refresh();
+        sb.AppendLine("Baseline Idle (Flyout Not Created):");
+        sb.AppendLine($"  Working Set:    {proc.WorkingSet64 / 1024.0 / 1024.0:F2} MB");
+        sb.AppendLine($"  Private Memory: {proc.PrivateMemorySize64 / 1024.0 / 1024.0:F2} MB");
+
+        // 1. First flyout creation & open
+        var swCreate = Stopwatch.StartNew();
+        EnsureFlyoutFormCreated();
+        swCreate.Stop();
+
+        var swShow = Stopwatch.StartNew();
+        _flyoutForm!.ShowFlyout(_notifyIcon);
+        Application.DoEvents();
+        swShow.Stop();
+
+        long firstCreateMs = swCreate.ElapsedMilliseconds;
+        long firstShowMs = swShow.ElapsedMilliseconds;
+        long totalFirstOpenMs = firstCreateMs + firstShowMs;
+
+        proc.Refresh();
+        sb.AppendLine($"\nFlyout Opened (Create: {firstCreateMs} ms, First Frame: {firstShowMs} ms, Total: {totalFirstOpenMs} ms):");
+        sb.AppendLine($"  Working Set:    {proc.WorkingSet64 / 1024.0 / 1024.0:F2} MB");
+        sb.AppendLine($"  Private Memory: {proc.PrivateMemorySize64 / 1024.0 / 1024.0:F2} MB");
+
+        // 2. Close flyout
+        _flyoutForm.CloseFlyout();
+        for (int i = 0; i < 20; i++)
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+        }
+
+        // 3. Trigger 5-second disposal timer tick immediately
+        OnFlyoutDisposeTimerTick(null, EventArgs.Empty);
+        Application.DoEvents();
+
+        proc.Refresh();
+        sb.AppendLine($"\nAfter Flyout Disposed & Working Set Trimmed (5s idle simulated):");
+        sb.AppendLine($"  Working Set:    {proc.WorkingSet64 / 1024.0 / 1024.0:F2} MB");
+        sb.AppendLine($"  Private Memory: {proc.PrivateMemorySize64 / 1024.0 / 1024.0:F2} MB");
+
+        // 4. Reopen after disposal (cold creation from cache)
+        var swReopenCreate = Stopwatch.StartNew();
+        EnsureFlyoutFormCreated();
+        swReopenCreate.Stop();
+
+        var swReopenShow = Stopwatch.StartNew();
+        _flyoutForm!.ShowFlyout(_notifyIcon);
+        Application.DoEvents();
+        swReopenShow.Stop();
+
+        long reopenCreateMs = swReopenCreate.ElapsedMilliseconds;
+        long reopenShowMs = swReopenShow.ElapsedMilliseconds;
+        long totalReopenMs = reopenCreateMs + reopenShowMs;
+
+        proc.Refresh();
+        sb.AppendLine($"\nReopened from Teardown (Create: {reopenCreateMs} ms, First Frame: {reopenShowMs} ms, Total: {totalReopenMs} ms):");
+        sb.AppendLine($"  Working Set:    {proc.WorkingSet64 / 1024.0 / 1024.0:F2} MB");
+        sb.AppendLine($"  Private Memory: {proc.PrivateMemorySize64 / 1024.0 / 1024.0:F2} MB");
+
+        _flyoutForm.CloseFlyout();
+        for (int i = 0; i < 20; i++)
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+        }
+        OnFlyoutDisposeTimerTick(null, EventArgs.Empty);
+        Application.DoEvents();
+        sb.AppendLine("============================================");
+
+        File.WriteAllText("lifecycle_results.txt", sb.ToString());
     }
 
     protected override void Dispose(bool disposing)
@@ -531,6 +733,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _brightnessService.BrightnessChanged -= OnBrightnessChanged;
 
                 StopAndDisposeTooltipTimer();
+                StopAndDisposeFlyoutDisposeTimer();
                 _systemListenerWindow.Dispose();
 
                 if (_notifyIcon is not null)
@@ -542,7 +745,15 @@ public sealed class TrayApplicationContext : ApplicationContext
                 }
 
                 _contextMenu.Dispose();
-                _flyoutForm.Dispose();
+
+                if (_flyoutForm != null)
+                {
+                    _flyoutForm.MonitorRenamed -= OnMonitorRenamed;
+                    _flyoutForm.FlyoutClosed -= OnFlyoutClosed;
+                    _flyoutForm.Dispose();
+                    _flyoutForm = null;
+                }
+
                 _brightnessService.Dispose();
             }
 

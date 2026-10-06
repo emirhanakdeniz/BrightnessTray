@@ -1,6 +1,7 @@
 namespace BrightnessTray.Services;
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 public sealed class AppSettings
 {
@@ -8,7 +9,13 @@ public sealed class AppSettings
     public Dictionary<string, string> MonitorAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
-public sealed class SettingsService
+[JsonSourceGenerationOptions(WriteIndented = true, PropertyNameCaseInsensitive = true)]
+[JsonSerializable(typeof(AppSettings))]
+internal partial class AppSettingsJsonContext : JsonSerializerContext
+{
+}
+
+public sealed class SettingsService : IDisposable
 {
     private static readonly string SettingsDirectory =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BrightnessTray");
@@ -16,14 +23,11 @@ public sealed class SettingsService
     private static readonly string SettingsFilePath =
         Path.Combine(SettingsDirectory, "settings.json");
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNameCaseInsensitive = true
-    };
-
     private readonly object _lock = new();
     private AppSettings _settings;
+    private bool _isDirty;
+    private System.Windows.Forms.Timer? _saveDebounceTimer;
+    private bool _disposed;
 
     public event Action<string, string?>? AliasChanged;
 
@@ -87,7 +91,7 @@ public sealed class SettingsService
                 _settings.MonitorAliases[monitorId] = sanitized;
             }
 
-            SaveInternal();
+            ScheduleSave();
         }
 
         try
@@ -140,11 +144,59 @@ public sealed class SettingsService
         {
             if (_settings.MonitorBrightness.TryGetValue(monitorId, out int oldVal) && oldVal == clamped)
             {
-                return; // Only write to disk when value actually changed
+                return; // Only write when value actually changed
             }
 
             _settings.MonitorBrightness[monitorId] = clamped;
-            SaveInternal();
+            ScheduleSave();
+        }
+    }
+
+    private void ScheduleSave()
+    {
+        if (_disposed) return;
+        _isDirty = true;
+
+        if (_saveDebounceTimer == null)
+        {
+            _saveDebounceTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+            _saveDebounceTimer.Tick += OnSaveDebounceTick;
+        }
+        else
+        {
+            _saveDebounceTimer.Stop();
+        }
+
+        _saveDebounceTimer.Start();
+    }
+
+    private void OnSaveDebounceTick(object? sender, EventArgs e)
+    {
+        StopAndDisposeSaveTimer();
+        Flush();
+    }
+
+    private void StopAndDisposeSaveTimer()
+    {
+        if (_saveDebounceTimer != null)
+        {
+            _saveDebounceTimer.Stop();
+            _saveDebounceTimer.Tick -= OnSaveDebounceTick;
+            _saveDebounceTimer.Dispose();
+            _saveDebounceTimer = null;
+        }
+    }
+
+    public void Flush()
+    {
+        StopAndDisposeSaveTimer();
+        lock (_lock)
+        {
+            if (_isDirty)
+            {
+                SaveInternal();
+                _isDirty = false;
+            }
         }
     }
 
@@ -163,7 +215,7 @@ public sealed class SettingsService
                 return new AppSettings();
             }
 
-            var loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions);
+            var loaded = JsonSerializer.Deserialize(json, AppSettingsJsonContext.Default.AppSettings);
             return loaded ?? new AppSettings();
         }
         catch
@@ -178,7 +230,7 @@ public sealed class SettingsService
         try
         {
             Directory.CreateDirectory(SettingsDirectory);
-            string json = JsonSerializer.Serialize(_settings, JsonOptions);
+            string json = JsonSerializer.Serialize(_settings, AppSettingsJsonContext.Default.AppSettings);
             string tempFilePath = Path.Combine(SettingsDirectory, $"settings.json.{Guid.NewGuid():N}.tmp");
 
             File.WriteAllText(tempFilePath, json);
@@ -187,6 +239,16 @@ public sealed class SettingsService
         catch
         {
             // Silently handle I/O failures, never crash
+        }
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _disposed = true;
+            Flush();
+            StopAndDisposeSaveTimer();
         }
     }
 }

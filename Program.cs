@@ -16,6 +16,15 @@ internal static class Program
             return;
         }
 
+        if (args.Length > 0 && args[0] == "--test-lifecycle")
+        {
+            MemoryInterop.AttachConsole(-1);
+            ApplicationConfiguration.Initialize();
+            using var ctx = new TrayApplicationContext();
+            ctx.RunLifecycleTest();
+            return;
+        }
+
         // Auto-generate app.ico if not yet created
         if (!File.Exists("app.ico"))
         {

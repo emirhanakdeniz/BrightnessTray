@@ -36,7 +36,7 @@ public sealed class FluentLabel : Control
         }
     }
 
-    public FluentLabel()
+    public FluentLabel(Font? font = null)
     {
         SetStyle(
             ControlStyles.UserPaint |
@@ -48,7 +48,10 @@ public sealed class FluentLabel : Control
             ControlStyles.StandardDoubleClick, true);
 
         BackColor = Color.Transparent;
-        Font = FluentTypography.CreateFont(9f);
+        if (font != null)
+        {
+            Font = font;
+        }
     }
 
     public void UpdateTheme(bool isDark, bool isMica, Color foreColor)

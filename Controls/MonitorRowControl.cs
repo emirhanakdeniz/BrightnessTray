@@ -55,6 +55,7 @@ public sealed class MonitorRowControl : Panel
         int displayIndex,
         BrightnessService brightnessService,
         SettingsService settingsService,
+        FlyoutGdiCache gdiCache,
         Action<bool>? onEditingStateChanged = null,
         Action<string, string>? onRenamed = null)
     {
@@ -84,10 +85,9 @@ public sealed class MonitorRowControl : Panel
             TabStop = false
         };
 
-        _monitorGlyph = new FluentLabel
+        _monitorGlyph = new FluentLabel(gdiCache.GlyphMediumFont)
         {
             Text = "\uE7F4", // Segoe Fluent Icons: TVMonitor / Screen
-            Font = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphMedium),
             Dock = DockStyle.Left,
             Width = Scale(20),
             TextAlign = ContentAlignment.MiddleLeft,
@@ -97,7 +97,7 @@ public sealed class MonitorRowControl : Panel
 
         if (_monitor.IsSoftware)
         {
-            _softwareBadge = new FluentBadge("Software")
+            _softwareBadge = new FluentBadge("Software", gdiCache.BadgeFont)
             {
                 Dock = DockStyle.Right,
                 Margin = Padding.Empty,
@@ -106,10 +106,9 @@ public sealed class MonitorRowControl : Panel
             _topPanel.Controls.Add(_softwareBadge);
         }
 
-        _pencilButton = new FluentLabel
+        _pencilButton = new FluentLabel(gdiCache.GlyphSmallFont)
         {
             Text = "\uE70F", // Segoe Fluent Icons: Edit / Pencil
-            Font = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphSmall),
             Dock = DockStyle.Right,
             Width = Scale(20),
             TextAlign = ContentAlignment.MiddleCenter,
@@ -122,10 +121,9 @@ public sealed class MonitorRowControl : Panel
         _pencilButton.Click += (s, e) => BeginInlineEdit();
         _topPanel.Controls.Add(_pencilButton);
 
-        _nameLabel = new FluentLabel
+        _nameLabel = new FluentLabel(gdiCache.SecondaryFont)
         {
             Text = _currentDisplayName,
-            Font = FluentTypography.CreateSecondaryFont(),
             AutoEllipsis = true,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
@@ -182,10 +180,9 @@ public sealed class MonitorRowControl : Panel
         _bottomTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         _bottomTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(48)));
 
-        _brightnessGlyph = new FluentLabel
+        _brightnessGlyph = new FluentLabel(gdiCache.GlyphMediumFont)
         {
             Text = "\uE706", // Segoe Fluent Icons: Brightness
-            Font = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphMedium),
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
             Margin = Padding.Empty,
@@ -203,10 +200,9 @@ public sealed class MonitorRowControl : Panel
             TabIndex = 0
         };
 
-        _percentLabel = new FluentLabel
+        _percentLabel = new FluentLabel(gdiCache.BodyBoldFont)
         {
             Text = $"{_monitor.CurrentPercent}%",
-            Font = FluentTypography.CreateBodyFont(FontStyle.Bold),
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleRight,
             Margin = Padding.Empty,
@@ -260,6 +256,20 @@ public sealed class MonitorRowControl : Panel
         foreach (Control child in control.Controls)
         {
             HookEvents(child);
+        }
+    }
+
+    private void UnhookEvents(Control control)
+    {
+        control.MouseEnter -= OnChildMouseEnter;
+        control.MouseLeave -= OnChildMouseLeave;
+        if (control != _slider && control != _pencilButton)
+        {
+            control.MouseWheel -= OnChildMouseWheel;
+        }
+        foreach (Control child in control.Controls)
+        {
+            UnhookEvents(child);
         }
     }
 
@@ -550,6 +560,8 @@ public sealed class MonitorRowControl : Panel
     {
         if (disposing)
         {
+            UnhookEvents(this);
+            _slider.ValueChanged -= OnSliderValueChanged;
             _cachedHoverBrush?.Dispose();
             _cachedHoverBrush = null;
 

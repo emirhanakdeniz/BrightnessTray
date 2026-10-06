@@ -4,6 +4,7 @@ using System.Diagnostics;
 using BrightnessTray.Controls;
 using BrightnessTray.Native;
 using BrightnessTray.Services;
+using BrightnessTray.UI;
 
 public sealed class FlyoutForm : Form
 {
@@ -14,11 +15,13 @@ public sealed class FlyoutForm : Form
     private readonly BrightnessService _brightnessService;
     private readonly SettingsService _settingsService;
     private readonly Panel _contentContainer;
+    private readonly FlyoutGdiCache _gdiCache;
     private NotifyIcon? _notifyIcon;
 
     private int _activeEditingCount;
     public bool IsInlineEditingActive => _activeEditingCount > 0;
     public event Action<string, string>? MonitorRenamed;
+    public event Action? FlyoutClosed;
 
     private BackdropKind _currentBackdrop = BackdropKind.Mica;
     private bool _isMicaActive;
@@ -68,6 +71,7 @@ public sealed class FlyoutForm : Form
         _brightnessService = brightnessService;
         _settingsService = settingsService;
         _notifyIcon = notifyIcon;
+        _gdiCache = new FlyoutGdiCache();
 
         // Window configuration
         FormBorderStyle = FormBorderStyle.None;
@@ -107,7 +111,7 @@ public sealed class FlyoutForm : Form
         base.OnDpiChanged(e);
         _contentContainer.Padding = new Padding(BrightnessTray.UI.Theme.Space16(DpiScale));
 
-        var table = _contentContainer.Controls.OfType<TableLayoutPanel>().FirstOrDefault();
+        var table = _contentContainer.Controls.Count > 0 && _contentContainer.Controls[0] is TableLayoutPanel t ? t : null;
         if (table != null)
         {
             int count = table.RowCount;
@@ -169,11 +173,16 @@ public sealed class FlyoutForm : Form
 
         Color accentColor = DwmInterop.GetAccentColor();
 
-        // Propagate theme to existing monitor rows
-        foreach (var row in _contentContainer.Controls.OfType<TableLayoutPanel>()
-            .SelectMany(t => t.Controls.OfType<MonitorRowControl>()))
+        // Propagate theme to existing monitor rows without LINQ allocations
+        if (_contentContainer.Controls.Count > 0 && _contentContainer.Controls[0] is TableLayoutPanel table)
         {
-            row.UpdateTheme(isDark, _isMicaActive, accentColor);
+            for (int i = 0; i < table.Controls.Count; i++)
+            {
+                if (table.Controls[i] is MonitorRowControl row)
+                {
+                    row.UpdateTheme(isDark, _isMicaActive, accentColor);
+                }
+            }
         }
 
         Invalidate();
@@ -255,42 +264,45 @@ public sealed class FlyoutForm : Form
 
     private MonitorRowControl? FindRowAtPoint(Point screenPt)
     {
-        var rows = _contentContainer.Controls.OfType<TableLayoutPanel>()
-            .SelectMany(t => t.Controls.OfType<MonitorRowControl>())
-            .ToList();
-
-        if (rows.Count == 0)
+        if (_contentContainer.Controls.Count == 0 || _contentContainer.Controls[0] is not TableLayoutPanel table)
         {
             return null;
         }
 
-        foreach (var row in rows)
-        {
-            var rowScreenRect = row.RectangleToScreen(row.ClientRectangle);
-            if (rowScreenRect.Contains(screenPt))
-            {
-                return row;
-            }
-        }
+        MonitorRowControl? firstRow = null;
+        MonitorRowControl? closestRow = null;
+        int minDistance = int.MaxValue;
 
-        if (rows.Count == 1)
+        for (int i = 0; i < table.Controls.Count; i++)
         {
-            return rows[0];
+            if (table.Controls[i] is MonitorRowControl row)
+            {
+                firstRow ??= row;
+                var rowScreenRect = row.RectangleToScreen(row.ClientRectangle);
+                if (rowScreenRect.Contains(screenPt))
+                {
+                    return row;
+                }
+
+                int dist = 0;
+                if (screenPt.Y < rowScreenRect.Top) dist = rowScreenRect.Top - screenPt.Y;
+                else if (screenPt.Y > rowScreenRect.Bottom) dist = screenPt.Y - rowScreenRect.Bottom;
+
+                if (dist < minDistance)
+                {
+                    minDistance = dist;
+                    closestRow = row;
+                }
+            }
         }
 
         var formScreenRect = RectangleToScreen(ClientRectangle);
         if (formScreenRect.Contains(screenPt))
         {
-            return rows.OrderBy(r =>
-            {
-                var rect = r.RectangleToScreen(r.ClientRectangle);
-                if (screenPt.Y < rect.Top) return rect.Top - screenPt.Y;
-                if (screenPt.Y > rect.Bottom) return screenPt.Y - rect.Bottom;
-                return 0;
-            }).FirstOrDefault();
+            return closestRow ?? firstRow;
         }
 
-        return null;
+        return firstRow;
     }
 
     public bool CanReopen()
@@ -365,6 +377,7 @@ public sealed class FlyoutForm : Form
             _isClosing = false;
             Hide();
             Opacity = 1.0;
+            FlyoutClosed?.Invoke();
             return;
         }
 
@@ -446,6 +459,7 @@ public sealed class FlyoutForm : Form
                 _isClosing = false;
                 Opacity = 1.0;
                 _lastClosedTimestamp = Stopwatch.GetTimestamp();
+                FlyoutClosed?.Invoke();
             }
             else
             {
@@ -478,6 +492,35 @@ public sealed class FlyoutForm : Form
         }
     }
 
+    private static bool AreMonitorsMatching(List<MonitorRowControl> existingRows, IReadOnlyList<MonitorInfo> monitors)
+    {
+        if (existingRows.Count != monitors.Count) return false;
+        for (int i = 0; i < existingRows.Count; i++)
+        {
+            if (!string.Equals(existingRows[i].MonitorId, monitors[i].Id, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private List<MonitorRowControl> GetExistingRows()
+    {
+        var list = new List<MonitorRowControl>();
+        if (_contentContainer.Controls.Count > 0 && _contentContainer.Controls[0] is TableLayoutPanel table)
+        {
+            for (int i = 0; i < table.Controls.Count; i++)
+            {
+                if (table.Controls[i] is MonitorRowControl row)
+                {
+                    list.Add(row);
+                }
+            }
+        }
+        return list;
+    }
+
     public void SeedMonitors(IReadOnlyList<MonitorInfo> monitors)
     {
         if (monitors.Count == 0 || _disposed || IsDisposed)
@@ -485,14 +528,9 @@ public sealed class FlyoutForm : Form
             return;
         }
 
-        var existingRows = _contentContainer.Controls.OfType<TableLayoutPanel>()
-            .SelectMany(t => t.Controls.OfType<MonitorRowControl>())
-            .ToList();
+        var existingRows = GetExistingRows();
 
-        bool matchesExisting = existingRows.Count == monitors.Count &&
-            existingRows.Select(r => r.MonitorId).SequenceEqual(monitors.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
-
-        if (matchesExisting)
+        if (AreMonitorsMatching(existingRows, monitors))
         {
             for (int i = 0; i < monitors.Count; i++)
             {
@@ -541,6 +579,7 @@ public sealed class FlyoutForm : Form
                     displayIndex,
                     _brightnessService,
                     _settingsService,
+                    _gdiCache,
                     onEditingStateChanged: isEditing =>
                     {
                         if (isEditing) _activeEditingCount++;
@@ -587,9 +626,7 @@ public sealed class FlyoutForm : Form
                 return;
             }
 
-            var existingRows = _contentContainer.Controls.OfType<TableLayoutPanel>()
-                .SelectMany(t => t.Controls.OfType<MonitorRowControl>())
-                .ToList();
+            var existingRows = GetExistingRows();
 
             if (monitors.Count == 0)
             {
@@ -602,10 +639,7 @@ public sealed class FlyoutForm : Form
             }
 
             // Check if existing rows already match current monitors
-            bool matchesExisting = existingRows.Count == monitors.Count &&
-                existingRows.Select(r => r.MonitorId).SequenceEqual(monitors.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
-
-            if (matchesExisting)
+            if (AreMonitorsMatching(existingRows, monitors))
             {
                 // Update brightness values in existing controls silently without rebuilding
                 for (int i = 0; i < monitors.Count; i++)
@@ -645,10 +679,9 @@ public sealed class FlyoutForm : Form
                 TabStop = false
             };
 
-            var glyph = new FluentLabel
+            var glyph = new FluentLabel(_gdiCache.GlyphLargeFont)
             {
                 Text = "\uE7F4", // Monitor screen glyph
-                Font = FluentTypography.CreateGlyphFont(BrightnessTray.UI.Theme.FontSizeGlyphLarge),
                 Dock = DockStyle.Top,
                 Height = Scale(36),
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -656,10 +689,9 @@ public sealed class FlyoutForm : Form
             };
             glyph.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
 
-            var title = new FluentLabel
+            var title = new FluentLabel(_gdiCache.BodyBoldFont)
             {
                 Text = "No DDC/CI displays found",
-                Font = FluentTypography.CreateBodyFont(FontStyle.Bold),
                 Dock = DockStyle.Top,
                 Height = Scale(22),
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -667,10 +699,9 @@ public sealed class FlyoutForm : Form
             };
             title.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextPrimary(isDark));
 
-            var message = new FluentLabel
+            var message = new FluentLabel(_gdiCache.SecondaryFont)
             {
                 Text = "Ensure DDC/CI is enabled in your monitor's OSD menu or connect a supported display.",
-                Font = FluentTypography.CreateSecondaryFont(),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.TopCenter,
                 TabStop = false
@@ -853,6 +884,7 @@ public sealed class FlyoutForm : Form
 
                 ClearContent();
                 _contentContainer.Dispose();
+                _gdiCache.Dispose();
             }
 
             _disposed = true;
