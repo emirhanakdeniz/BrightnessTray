@@ -52,8 +52,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _brightnessService = new BrightnessService(_brightnessProvider, _settingsService);
 
-        bool initialIsDark = _settingsService.ResolveIsDarkMode();
-        _contextMenu = new FluentContextMenu(initialIsDark);
+        _contextMenu = new FluentContextMenu(isDarkMode: true);
 
         var startWithWindowsItem = new FluentToggleMenuItem(
             "Start with Windows",
@@ -61,41 +60,17 @@ public sealed class TrayApplicationContext : ApplicationContext
             AutoStartManager.IsAutoStartEnabled());
         startWithWindowsItem.ToggleChanged += OnStartWithWindowsToggled;
 
-        var themeSubMenu = new FluentMenuItem("Theme", "\uE771"); // Segoe Fluent Icons: Personalize
-        var systemThemeItem = new FluentMenuItem("System", "\uE770", (s, e) => SetTheme(AppThemeMode.System));
-        var lightThemeItem = new FluentMenuItem("Light", "\uE706", (s, e) => SetTheme(AppThemeMode.Light));
-        var darkThemeItem = new FluentMenuItem("Dark", "\uE708", (s, e) => SetTheme(AppThemeMode.Dark));
-
-        themeSubMenu.DropDownItems.AddRange(new ToolStripItem[]
-        {
-            systemThemeItem,
-            lightThemeItem,
-            darkThemeItem
-        });
-
-        void UpdateThemeMenuChecks()
-        {
-            var currentMode = _settingsService.GetThemeMode();
-            systemThemeItem.Checked = (currentMode == AppThemeMode.System);
-            lightThemeItem.Checked = (currentMode == AppThemeMode.Light);
-            darkThemeItem.Checked = (currentMode == AppThemeMode.Dark);
-        }
-
-        UpdateThemeMenuChecks();
-
         var separatorItem = new ToolStripSeparator();
         var exitItem = new FluentMenuItem("Exit", "\uE7E8", OnExitClicked);
 
         _contextMenu.Opening += (s, e) =>
         {
             startWithWindowsItem.Checked = AutoStartManager.IsAutoStartEnabled();
-            UpdateThemeMenuChecks();
         };
 
         _contextMenu.Items.AddRange(new ToolStripItem[]
         {
             startWithWindowsItem,
-            themeSubMenu,
             separatorItem,
             exitItem
         });
@@ -152,14 +127,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void SetTheme(AppThemeMode mode)
-    {
-        if (_settingsService.SetThemeMode(mode))
-        {
-            OnThemeOrColorChanged();
-        }
-    }
-
     private void OnThemeOrColorChanged()
     {
         if (_disposed) return;
@@ -167,9 +134,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         _loggedIdleMessage = false;
 #endif
         RefreshTrayIcon(recreateTrayIcon: false);
-        bool isDark = _settingsService.ResolveIsDarkMode();
         Color accent = DwmInterop.GetAccentColor();
-        _contextMenu.UpdateTheme(isDark, accent);
+        _contextMenu.UpdateTheme(isDark: true, accent);
 
         if (_flyoutForm != null && !_flyoutForm.IsDisposed)
         {

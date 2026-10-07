@@ -3,23 +3,14 @@ namespace BrightnessTray.Services;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-public enum AppThemeMode
-{
-    System = 0,
-    Light = 1,
-    Dark = 2
-}
-
 public sealed class AppSettings
 {
     public Dictionary<string, int> MonitorBrightness { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> MonitorAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-    public AppThemeMode ThemeMode { get; set; } = AppThemeMode.System;
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true, PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(AppSettings))]
-[JsonSerializable(typeof(AppThemeMode))]
 internal partial class AppSettingsJsonContext : JsonSerializerContext
 {
 }
@@ -39,7 +30,6 @@ public sealed class SettingsService : IDisposable
     private bool _disposed;
 
     public event Action<string, string?>? AliasChanged;
-    public event Action<AppThemeMode>? ThemeModeChanged;
 
     public SettingsService()
     {
@@ -53,53 +43,9 @@ public sealed class SettingsService : IDisposable
             return new AppSettings
             {
                 MonitorBrightness = new Dictionary<string, int>(_settings.MonitorBrightness, StringComparer.OrdinalIgnoreCase),
-                MonitorAliases = new Dictionary<string, string>(_settings.MonitorAliases, StringComparer.OrdinalIgnoreCase),
-                ThemeMode = _settings.ThemeMode
+                MonitorAliases = new Dictionary<string, string>(_settings.MonitorAliases, StringComparer.OrdinalIgnoreCase)
             };
         }
-    }
-
-    public AppThemeMode GetThemeMode()
-    {
-        lock (_lock)
-        {
-            return _settings.ThemeMode;
-        }
-    }
-
-    public bool SetThemeMode(AppThemeMode mode)
-    {
-        lock (_lock)
-        {
-            if (_settings.ThemeMode == mode)
-            {
-                return false;
-            }
-            _settings.ThemeMode = mode;
-            ScheduleSave();
-        }
-
-        try
-        {
-            ThemeModeChanged?.Invoke(mode);
-        }
-        catch
-        {
-            // Fail silently
-        }
-
-        return true;
-    }
-
-    public bool ResolveIsDarkMode()
-    {
-        AppThemeMode mode = GetThemeMode();
-        return mode switch
-        {
-            AppThemeMode.Light => false,
-            AppThemeMode.Dark => true,
-            _ => !BrightnessTray.Native.DwmInterop.IsAppsUseLightTheme()
-        };
     }
 
     public string? GetAlias(string monitorId)

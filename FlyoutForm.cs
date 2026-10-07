@@ -44,7 +44,7 @@ public sealed class FlyoutForm : Form
     public int Scale(int pixels) => BrightnessTray.UI.Theme.Scale(pixels, DpiScale);
 
     public bool IsShowingOrVisible => Visible || _isAnimating;
-    public bool IsDarkMode => _settingsService.ResolveIsDarkMode();
+    public bool IsDarkMode => true;
 
     public BackdropKind CurrentBackdrop
     {
