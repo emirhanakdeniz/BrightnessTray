@@ -9,13 +9,6 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        // Support one-off dev command to generate multi-size app.ico
-        if (args.Length > 0 && args[0] == "--generate-icon")
-        {
-            IconRenderer.GenerateAppIconFile("app.ico");
-            return;
-        }
-
         if (args.Length > 0 && args[0] == "--test-lifecycle")
         {
             MemoryInterop.AttachConsole(-1);
@@ -23,19 +16,6 @@ internal static class Program
             using var ctx = new TrayApplicationContext();
             ctx.RunLifecycleTest();
             return;
-        }
-
-        // Auto-generate app.ico if not yet created
-        if (!File.Exists("app.ico"))
-        {
-            try
-            {
-                IconRenderer.GenerateAppIconFile("app.ico");
-            }
-            catch
-            {
-                // Silently continue
-            }
         }
 
         // Prevent multiple instances using a named Mutex
@@ -53,7 +33,10 @@ internal static class Program
         }
         finally
         {
-            mutex.ReleaseMutex();
+            if (isOnlyInstance)
+            {
+                try { mutex.ReleaseMutex(); } catch { /* Ignore */ }
+            }
         }
     }
 }

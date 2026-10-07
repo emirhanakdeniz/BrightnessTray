@@ -282,6 +282,10 @@ public sealed class MonitorRowControl : Panel
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
+        if (e is HandledMouseEventArgs h)
+        {
+            h.Handled = true;
+        }
         StepSlider(e.Delta);
     }
 
@@ -315,6 +319,10 @@ public sealed class MonitorRowControl : Panel
 
     private void OnChildMouseWheel(object? sender, MouseEventArgs e)
     {
+        if (e is HandledMouseEventArgs h)
+        {
+            h.Handled = true;
+        }
         StepSlider(e.Delta);
     }
 

@@ -363,8 +363,18 @@ public sealed class FluentSlider : Control
         }
     }
 
+    private long _lastWheelStepTimestamp;
+
     public void StepValue(int delta)
     {
+        long now = Stopwatch.GetTimestamp();
+        double elapsedMs = (now - _lastWheelStepTimestamp) * 1000.0 / Stopwatch.Frequency;
+        if (elapsedMs < 35.0)
+        {
+            return;
+        }
+        _lastWheelStepTimestamp = now;
+
         int notches = delta / 120;
         int step = notches != 0 ? notches * 5 : (delta > 0 ? 5 : -5);
         int targetVal = Math.Clamp(Value + step, _minimum, _maximum);
@@ -379,6 +389,10 @@ public sealed class FluentSlider : Control
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
+        if (e is HandledMouseEventArgs h)
+        {
+            h.Handled = true;
+        }
         StepValue(e.Delta);
     }
 

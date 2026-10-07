@@ -258,13 +258,6 @@ public sealed class FlyoutForm : Form
         base.WndProc(ref m);
     }
 
-    protected override void OnMouseWheel(MouseEventArgs e)
-    {
-        base.OnMouseWheel(e);
-        var row = FindRowAtPoint(Cursor.Position);
-        row?.StepSlider(e.Delta);
-    }
-
     private MonitorRowControl? FindRowAtPoint(Point screenPt)
     {
         if (_contentContainer.Controls.Count == 0 || _contentContainer.Controls[0] is not TableLayoutPanel table)

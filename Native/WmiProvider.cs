@@ -10,6 +10,12 @@ public class WmiProvider : IBrightnessProvider
     {
         var monitors = new List<MonitorInfo>();
 
+        // If the laptop lid is closed (or internal display path is inactive in Windows topology), do not show it
+        if (!DisplayConfigInterop.IsInternalDisplayActive())
+        {
+            return monitors;
+        }
+
         try
         {
             using var searcher = new ManagementObjectSearcher(_wmiScope, new SelectQuery("WmiMonitorBrightness"));
