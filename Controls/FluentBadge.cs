@@ -81,13 +81,13 @@ public sealed class FluentBadge : Control
             g.FillPath(brush, path);
         }
 
-        TextRenderer.DrawText(
+        FluentTypography.DrawText(
             g,
             Text,
             Font,
             rect,
             textColor,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            ContentAlignment.MiddleCenter);
     }
 
     private static GraphicsPath CreateRoundedRectanglePath(Rectangle rect, int radius)

@@ -1,0 +1,201 @@
+namespace BrightnessTray.Controls;
+
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Windows.Forms;
+using BrightnessTray.UI;
+
+public sealed class FluentMenuItem : ToolStripMenuItem
+{
+    private string? _glyph;
+    private bool _isDarkMode = true;
+
+    public string? Glyph
+    {
+        get => _glyph;
+        set
+        {
+            if (_glyph != value)
+            {
+                _glyph = value;
+                Invalidate();
+            }
+        }
+    }
+
+    public new bool Checked
+    {
+        get => base.Checked;
+        set
+        {
+            if (base.Checked != value)
+            {
+                base.Checked = value;
+                Invalidate();
+            }
+        }
+    }
+
+    public bool IsDarkMode
+    {
+        get
+        {
+            if (Owner is FluentContextMenu menu) return menu.IsDarkMode;
+            if (OwnerItem is FluentMenuItem parentItem) return parentItem.IsDarkMode;
+            return _isDarkMode;
+        }
+        set
+        {
+            if (_isDarkMode != value)
+            {
+                _isDarkMode = value;
+                Invalidate();
+                if (HasDropDownItems)
+                {
+                    for (int i = 0; i < DropDownItems.Count; i++)
+                    {
+                        if (DropDownItems[i] is FluentMenuItem sub)
+                        {
+                            sub.IsDarkMode = value;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public FluentMenuItem(string text, string? glyph = null, EventHandler? onClick = null)
+        : base(text, null, onClick)
+    {
+        _glyph = glyph;
+        Font = FluentTypography.CreateBodyFont();
+    }
+
+    public override Size GetPreferredSize(Size proposedSize)
+    {
+        float scale = ((Owner?.DeviceDpi ?? 0) > 0 ? Owner!.DeviceDpi : 96) / 96f;
+        int minWidth = Theme.Scale(HasDropDownItems || Checked ? 180 : 240, scale);
+        int height = Theme.Scale(36, scale);
+
+        int textWidth = TextRenderer.MeasureText(Text, Font).Width;
+        int totalWidth = Math.Max(minWidth, textWidth + Theme.Scale(72, scale));
+
+        return new Size(totalWidth, height);
+    }
+
+    protected override ToolStripDropDown CreateDefaultDropDown()
+    {
+        var dropDown = base.CreateDefaultDropDown();
+        if (dropDown is ToolStripDropDownMenu dropDownMenu)
+        {
+            dropDownMenu.ShowImageMargin = false;
+            dropDownMenu.ShowCheckMargin = false;
+            dropDownMenu.DropShadowEnabled = false;
+
+            float scale = ((Owner?.DeviceDpi ?? 0) > 0 ? Owner!.DeviceDpi : 96) / 96f;
+            dropDownMenu.Padding = new Padding(Theme.Space4(scale), Theme.Space4(scale), Theme.Space4(scale), Theme.Space4(scale));
+
+            dropDownMenu.Opening += (s, e) =>
+            {
+                if (Owner != null)
+                {
+                    dropDownMenu.Renderer = Owner.Renderer;
+                }
+            };
+
+            dropDownMenu.HandleCreated += (s, e) =>
+            {
+                BrightnessTray.Native.DwmInterop.ApplyMenuWindowAttributes(dropDownMenu.Handle, IsDarkMode);
+            };
+
+            dropDownMenu.Opened += (s, e) =>
+            {
+                BrightnessTray.Native.DwmInterop.ApplyMenuWindowAttributes(dropDownMenu.Handle, IsDarkMode);
+            };
+        }
+        return dropDown;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        float scale = ((Owner?.DeviceDpi ?? 0) > 0 ? Owner!.DeviceDpi : 96) / 96f;
+        int itemWidth = Math.Max(Width, Owner?.ClientSize.Width ?? Width);
+        int itemHeight = Math.Max(Height, Theme.Scale(36, scale));
+
+        bool isDark = IsDarkMode;
+
+        // Draw hover pill if selected
+        if (Selected && Enabled)
+        {
+            int insetH = Theme.Space4(scale);
+            int insetV = Math.Max(1, Theme.Scale(2, scale));
+            int radius = Theme.Radius4(scale);
+
+            var hoverRect = new Rectangle(
+                insetH,
+                insetV,
+                itemWidth - insetH * 2 - 1,
+                itemHeight - insetV * 2 - 1);
+
+            Color hoverColor = isDark
+                ? Color.FromArgb(22, 255, 255, 255)
+                : Color.FromArgb(14, 0, 0, 0);
+
+            using var path = Theme.CreateRoundedRectanglePath(hoverRect, radius);
+            using var brush = new SolidBrush(hoverColor);
+            g.FillPath(brush, path);
+        }
+
+        Color textColor = Enabled
+            ? Theme.TextPrimary(isDark)
+            : Theme.TextDisabled(isDark);
+
+        // 1. Draw leading Fluent glyph if provided
+        int textLeft = Theme.Space12(scale);
+        if (!string.IsNullOrEmpty(_glyph))
+        {
+            int glyphSize = Theme.Scale(16, scale);
+            var glyphRect = new Rectangle(textLeft, (itemHeight - glyphSize) / 2, glyphSize, glyphSize);
+
+            using var glyphFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphMedium);
+            FluentTypography.DrawText(g, _glyph, glyphFont, glyphRect, textColor, ContentAlignment.MiddleCenter);
+
+            textLeft += glyphSize + Theme.Space12(scale);
+        }
+
+        // 2. Draw right-side indicator: ChevronRight if HasDropDownItems, or CheckMark if Checked
+        int textRightPadding = Theme.Space12(scale);
+        if (HasDropDownItems)
+        {
+            int chevronSize = Theme.Scale(12, scale);
+            int chevronX = itemWidth - Theme.Space12(scale) - chevronSize;
+            var chevronRect = new Rectangle(chevronX, (itemHeight - chevronSize) / 2, chevronSize, chevronSize);
+            using var chevronFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphSmall);
+            Color chevronColor = Theme.TextSecondary(isDark);
+            FluentTypography.DrawText(g, "\uE76C", chevronFont, chevronRect, chevronColor, ContentAlignment.MiddleCenter);
+            textRightPadding = Theme.Space12(scale) + chevronSize + Theme.Space8(scale);
+        }
+        else if (Checked)
+        {
+            int checkSize = Theme.Scale(14, scale);
+            int checkX = itemWidth - Theme.Space12(scale) - checkSize;
+            var checkRect = new Rectangle(checkX, (itemHeight - checkSize) / 2, checkSize, checkSize);
+            using var checkFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphSmall);
+            Color checkColor = Theme.TextPrimary(isDark);
+            FluentTypography.DrawText(g, "\uE73E", checkFont, checkRect, checkColor, ContentAlignment.MiddleCenter);
+            textRightPadding = Theme.Space12(scale) + checkSize + Theme.Space8(scale);
+        }
+
+        // 3. Draw item text
+        var textRect = new Rectangle(
+            textLeft,
+            0,
+            itemWidth - textLeft - textRightPadding,
+            itemHeight);
+
+        FluentTypography.DrawText(g, Text ?? string.Empty, Font, textRect, textColor, ContentAlignment.MiddleLeft);
+    }
+}

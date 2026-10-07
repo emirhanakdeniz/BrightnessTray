@@ -79,37 +79,10 @@ public sealed class SystemMessageListenerWindow : NativeWindow, IDisposable
         {
             case WM_SETTINGCHANGE:
             {
-                bool isThemeOrVisual = false;
-                if (m.LParam == IntPtr.Zero)
-                {
-                    isThemeOrVisual = true;
-                }
-                else
-                {
-                    try
-                    {
-                        string? area = Marshal.PtrToStringAuto(m.LParam);
-                        if (string.IsNullOrEmpty(area) ||
-                            area.Equals("ImmersiveColorSet", StringComparison.OrdinalIgnoreCase) ||
-                            area.Equals("UserPreferences", StringComparison.OrdinalIgnoreCase) ||
-                            area.Equals("WindowMetrics", StringComparison.OrdinalIgnoreCase))
-                        {
-                            isThemeOrVisual = true;
-                        }
-                    }
-                    catch
-                    {
-                        isThemeOrVisual = true;
-                    }
-                }
-
-                if (isThemeOrVisual)
-                {
 #if DEBUG
-                    LogWake("WM_SETTINGCHANGE (theme/preference change)");
+                LogWake("WM_SETTINGCHANGE (theme/preference change)");
 #endif
-                    ScheduleThemeAndTaskbarDebounce(recreateTaskbar: false);
-                }
+                ScheduleThemeAndTaskbarDebounce(recreateTaskbar: false);
                 break;
             }
 

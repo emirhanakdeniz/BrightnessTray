@@ -44,6 +44,7 @@ public sealed class FlyoutForm : Form
     public int Scale(int pixels) => BrightnessTray.UI.Theme.Scale(pixels, DpiScale);
 
     public bool IsShowingOrVisible => Visible || _isAnimating;
+    public bool IsDarkMode => _settingsService.ResolveIsDarkMode();
 
     public BackdropKind CurrentBackdrop
     {
@@ -115,11 +116,13 @@ public sealed class FlyoutForm : Form
         if (table != null)
         {
             int count = table.RowCount;
-            int rowHeight = Scale(60);
             int rowSpacing = BrightnessTray.UI.Theme.Space12(DpiScale);
             for (int i = 0; i < count; i++)
             {
                 int currentSpacing = (i < count - 1) ? rowSpacing : 0;
+                int rowHeight = (i < table.Controls.Count && table.Controls[i] is MonitorRowControl r)
+                    ? r.Height
+                    : Scale(58);
                 if (i < table.RowStyles.Count)
                 {
                     table.RowStyles[i].Height = rowHeight + currentSpacing;
@@ -151,7 +154,7 @@ public sealed class FlyoutForm : Form
             return;
         }
 
-        bool isDark = !DwmInterop.IsAppsUseLightTheme();
+        bool isDark = IsDarkMode;
 
         if (DwmInterop.IsMicaSupported() && CurrentBackdrop != BackdropKind.None)
         {
@@ -327,6 +330,11 @@ public sealed class FlyoutForm : Form
         if (!CanReopen())
         {
             return;
+        }
+
+        if (!IsHandleCreated)
+        {
+            CreateHandle();
         }
 
         PositionNearTaskbar();
@@ -549,7 +557,7 @@ public sealed class FlyoutForm : Form
         {
             ClearContent();
 
-            bool isDark = !DwmInterop.IsAppsUseLightTheme();
+            bool isDark = IsDarkMode;
             Color accentColor = DwmInterop.GetAccentColor();
 
             var table = new TableLayoutPanel
@@ -565,7 +573,7 @@ public sealed class FlyoutForm : Form
 
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 
-            int rowHeight = Scale(60);
+            int rowHeight = Scale(58);
             int rowSpacing = BrightnessTray.UI.Theme.Space12(DpiScale);
 
             for (int i = 0; i < monitors.Count; i++)
@@ -591,8 +599,10 @@ public sealed class FlyoutForm : Form
                     })
                 {
                     Dock = DockStyle.Fill,
-                    Margin = new Padding(0, 0, 0, currentSpacing)
+                    Margin = new Padding(0, 0, 0, currentSpacing),
+                    ShowBottomDivider = (i < monitors.Count - 1)
                 };
+                row.ExpandedChanged += RecalculateLayout;
                 row.UpdateTheme(isDark, _isMicaActive, accentColor);
                 table.Controls.Add(row, 0, i);
             }
@@ -605,6 +615,36 @@ public sealed class FlyoutForm : Form
         }
 
         UpdateFormBounds(monitors.Count);
+    }
+
+    private void RecalculateLayout()
+    {
+        if (_contentContainer.Controls.Count > 0 && _contentContainer.Controls[0] is TableLayoutPanel table)
+        {
+            int rowSpacing = BrightnessTray.UI.Theme.Space12(DpiScale);
+            int totalRowsHeight = 0;
+
+            for (int i = 0; i < table.Controls.Count; i++)
+            {
+                if (table.Controls[i] is MonitorRowControl row)
+                {
+                    int currentSpacing = (i < table.Controls.Count - 1) ? rowSpacing : 0;
+                    int h = row.Height;
+                    if (i < table.RowStyles.Count)
+                    {
+                        table.RowStyles[i].Height = h + currentSpacing;
+                    }
+                    totalRowsHeight += h + currentSpacing;
+                }
+            }
+
+            int paddingTotal = BrightnessTray.UI.Theme.Space16(DpiScale) * 2;
+            int contentHeight = paddingTotal + totalRowsHeight;
+            int width = Scale(360);
+
+            Size = new Size(width, contentHeight);
+            PositionNearTaskbar();
+        }
     }
 
     public async Task RefreshMonitorsAsync()
@@ -669,7 +709,7 @@ public sealed class FlyoutForm : Form
         {
             ClearContent();
 
-            bool isDark = !DwmInterop.IsAppsUseLightTheme();
+            bool isDark = IsDarkMode;
 
             var emptyPanel = new Panel
             {
@@ -733,7 +773,7 @@ public sealed class FlyoutForm : Form
 
     private void UpdateFormBounds(int monitorCount)
     {
-        int width = Scale(320);
+        int width = Scale(360);
         int contentHeight;
 
         if (monitorCount == 0)
@@ -743,8 +783,24 @@ public sealed class FlyoutForm : Form
         else
         {
             int paddingTotal = BrightnessTray.UI.Theme.Space16(DpiScale) * 2;
-            int rowsTotal = monitorCount * Scale(60);
+            int rowsTotal = 0;
             int spacingTotal = Math.Max(0, monitorCount - 1) * BrightnessTray.UI.Theme.Space12(DpiScale);
+
+            if (_contentContainer.Controls.Count > 0 && _contentContainer.Controls[0] is TableLayoutPanel table)
+            {
+                for (int i = 0; i < table.Controls.Count; i++)
+                {
+                    if (table.Controls[i] is MonitorRowControl row)
+                    {
+                        rowsTotal += row.Height;
+                    }
+                }
+            }
+            else
+            {
+                rowsTotal = monitorCount * Scale(58);
+            }
+
             contentHeight = paddingTotal + rowsTotal + spacingTotal;
         }
 

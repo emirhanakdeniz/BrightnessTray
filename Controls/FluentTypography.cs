@@ -99,51 +99,57 @@ public static class FluentTypography
             return;
         }
 
-        var flags = TextFormatFlags.NoPadding;
-
-        switch (align)
+        using var brush = new SolidBrush(color);
+        using var sf = new StringFormat(StringFormat.GenericTypographic)
         {
-            case ContentAlignment.TopLeft:
-            case ContentAlignment.MiddleLeft:
-            case ContentAlignment.BottomLeft:
-                flags |= TextFormatFlags.Left;
-                break;
-            case ContentAlignment.TopCenter:
-            case ContentAlignment.MiddleCenter:
-            case ContentAlignment.BottomCenter:
-                flags |= TextFormatFlags.HorizontalCenter;
-                break;
-            case ContentAlignment.TopRight:
-            case ContentAlignment.MiddleRight:
-            case ContentAlignment.BottomRight:
-                flags |= TextFormatFlags.Right;
-                break;
-        }
-
-        switch (align)
-        {
-            case ContentAlignment.TopLeft:
-            case ContentAlignment.TopCenter:
-            case ContentAlignment.TopRight:
-                flags |= TextFormatFlags.Top;
-                break;
-            case ContentAlignment.MiddleLeft:
-            case ContentAlignment.MiddleCenter:
-            case ContentAlignment.MiddleRight:
-                flags |= TextFormatFlags.VerticalCenter;
-                break;
-            case ContentAlignment.BottomLeft:
-            case ContentAlignment.BottomCenter:
-            case ContentAlignment.BottomRight:
-                flags |= TextFormatFlags.Bottom;
-                break;
-        }
+            FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces
+        };
 
         if (autoEllipsis)
         {
-            flags |= TextFormatFlags.EndEllipsis;
+            sf.Trimming = StringTrimming.EllipsisCharacter;
         }
 
-        TextRenderer.DrawText(g, text, font, bounds, color, flags);
+        switch (align)
+        {
+            case ContentAlignment.TopLeft:
+            case ContentAlignment.MiddleLeft:
+            case ContentAlignment.BottomLeft:
+                sf.Alignment = StringAlignment.Near;
+                break;
+            case ContentAlignment.TopCenter:
+            case ContentAlignment.MiddleCenter:
+            case ContentAlignment.BottomCenter:
+                sf.Alignment = StringAlignment.Center;
+                break;
+            case ContentAlignment.TopRight:
+            case ContentAlignment.MiddleRight:
+            case ContentAlignment.BottomRight:
+                sf.Alignment = StringAlignment.Far;
+                break;
+        }
+
+        switch (align)
+        {
+            case ContentAlignment.TopLeft:
+            case ContentAlignment.TopCenter:
+            case ContentAlignment.TopRight:
+                sf.LineAlignment = StringAlignment.Near;
+                break;
+            case ContentAlignment.MiddleLeft:
+            case ContentAlignment.MiddleCenter:
+            case ContentAlignment.MiddleRight:
+                sf.LineAlignment = StringAlignment.Center;
+                break;
+            case ContentAlignment.BottomLeft:
+            case ContentAlignment.BottomCenter:
+            case ContentAlignment.BottomRight:
+                sf.LineAlignment = StringAlignment.Far;
+                break;
+        }
+
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        var rectF = new RectangleF(bounds.X, bounds.Y, bounds.Width, bounds.Height);
+        g.DrawString(text, font, brush, rectF, sf);
     }
 }

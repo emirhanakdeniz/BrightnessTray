@@ -181,15 +181,45 @@ public static class DwmInterop
         }
     }
 
+    public static void ApplyMenuWindowAttributes(IntPtr hWnd, bool isDarkMode)
+    {
+        try
+        {
+            int darkMode = isDarkMode ? 1 : 0;
+            DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
+
+            int cornerPref = (int)DWM_WINDOW_CORNER_PREFERENCE.DWMWCP_ROUND;
+            DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPref, sizeof(int));
+
+            int borderColor = isDarkMode
+                ? (0x3C << 16) | (0x3C << 8) | 0x3C
+                : (0xDB << 16) | (0xDB << 8) | 0xDB;
+            DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_BORDER_COLOR, ref borderColor, sizeof(int));
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[DwmInterop] Failed to apply menu window attributes: {ex.Message}");
+        }
+    }
+
     public static bool IsAppsUseLightTheme()
     {
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            var value = key?.GetValue("AppsUseLightTheme");
-            if (value is int intVal)
+            if (key != null)
             {
-                return intVal == 1;
+                var value = key.GetValue("AppsUseLightTheme");
+                if (value is int intVal)
+                {
+                    return intVal == 1;
+                }
+
+                var sysVal = key.GetValue("SystemUsesLightTheme");
+                if (sysVal is int intSys)
+                {
+                    return intSys == 1;
+                }
             }
         }
         catch

@@ -56,7 +56,7 @@ public static class Theme
         isDark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(229, 229, 229);
 
     public static Color TrackUnfilled(bool isDark) =>
-        isDark ? Color.FromArgb(77, 77, 77) : Color.FromArgb(204, 204, 204);
+        isDark ? Color.FromArgb(77, 77, 77) : Color.FromArgb(220, 222, 224);
 
     public static Color HoverOverlay(bool isDark) =>
         isDark ? Color.FromArgb(10, 255, 255, 255) : Color.FromArgb(8, 0, 0, 0);

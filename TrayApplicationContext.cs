@@ -2,13 +2,16 @@ namespace BrightnessTray;
 
 using System.Diagnostics;
 using System.Text;
+using Microsoft.Win32;
+using BrightnessTray.Controls;
 using BrightnessTray.Native;
 using BrightnessTray.Services;
+using BrightnessTray.UI;
 
 public sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly NotifyIcon _notifyIcon;
-    private readonly ContextMenuStrip _contextMenu;
+    private readonly FluentContextMenu _contextMenu;
     private readonly IBrightnessProvider _brightnessProvider;
     private readonly SettingsService _settingsService;
     private readonly BrightnessService _brightnessService;
@@ -49,31 +52,50 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _brightnessService = new BrightnessService(_brightnessProvider, _settingsService);
 
-        _contextMenu = new ContextMenuStrip();
+        bool initialIsDark = _settingsService.ResolveIsDarkMode();
+        _contextMenu = new FluentContextMenu(initialIsDark);
 
-        var startWithWindowsItem = new ToolStripMenuItem("Start with Windows")
+        var startWithWindowsItem = new FluentToggleMenuItem(
+            "Start with Windows",
+            "\uE7F4",
+            AutoStartManager.IsAutoStartEnabled());
+        startWithWindowsItem.ToggleChanged += OnStartWithWindowsToggled;
+
+        var themeSubMenu = new FluentMenuItem("Theme", "\uE771"); // Segoe Fluent Icons: Personalize
+        var systemThemeItem = new FluentMenuItem("System", "\uE770", (s, e) => SetTheme(AppThemeMode.System));
+        var lightThemeItem = new FluentMenuItem("Light", "\uE706", (s, e) => SetTheme(AppThemeMode.Light));
+        var darkThemeItem = new FluentMenuItem("Dark", "\uE708", (s, e) => SetTheme(AppThemeMode.Dark));
+
+        themeSubMenu.DropDownItems.AddRange(new ToolStripItem[]
         {
-            CheckOnClick = true,
-            Checked = AutoStartManager.IsAutoStartEnabled()
-        };
-        startWithWindowsItem.Click += OnStartWithWindowsClicked;
+            systemThemeItem,
+            lightThemeItem,
+            darkThemeItem
+        });
 
-        var listMonitorsItem = new ToolStripMenuItem("Test: list monitors", null, OnTestListMonitorsClicked);
-        var setFiftyPercentItem = new ToolStripMenuItem("Test: set 50%", null, OnTestSetFiftyPercentClicked);
+        void UpdateThemeMenuChecks()
+        {
+            var currentMode = _settingsService.GetThemeMode();
+            systemThemeItem.Checked = (currentMode == AppThemeMode.System);
+            lightThemeItem.Checked = (currentMode == AppThemeMode.Light);
+            darkThemeItem.Checked = (currentMode == AppThemeMode.Dark);
+        }
+
+        UpdateThemeMenuChecks();
+
         var separatorItem = new ToolStripSeparator();
-        var exitItem = new ToolStripMenuItem("Exit", null, OnExitClicked);
+        var exitItem = new FluentMenuItem("Exit", "\uE7E8", OnExitClicked);
 
         _contextMenu.Opening += (s, e) =>
         {
             startWithWindowsItem.Checked = AutoStartManager.IsAutoStartEnabled();
+            UpdateThemeMenuChecks();
         };
 
         _contextMenu.Items.AddRange(new ToolStripItem[]
         {
             startWithWindowsItem,
-            new ToolStripSeparator(),
-            listMonitorsItem,
-            setFiftyPercentItem,
+            themeSubMenu,
             separatorItem,
             exitItem
         });
@@ -104,6 +126,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         // Listen for brightness adjustments to throttle tooltip updates
         _brightnessService.BrightnessChanged += OnBrightnessChanged;
 
+        // Listen for live system theme changes (Rule 5)
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+
         // Restore saved brightness values and initialize tooltip status
         _ = Task.Run(StartupInitializationAsync);
 
@@ -119,6 +144,22 @@ public sealed class TrayApplicationContext : ApplicationContext
 #endif
     }
 
+    private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category == UserPreferenceCategory.General || e.Category == UserPreferenceCategory.Color || e.Category == UserPreferenceCategory.VisualStyle)
+        {
+            OnThemeOrColorChanged();
+        }
+    }
+
+    private void SetTheme(AppThemeMode mode)
+    {
+        if (_settingsService.SetThemeMode(mode))
+        {
+            OnThemeOrColorChanged();
+        }
+    }
+
     private void OnThemeOrColorChanged()
     {
         if (_disposed) return;
@@ -126,6 +167,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         _loggedIdleMessage = false;
 #endif
         RefreshTrayIcon(recreateTrayIcon: false);
+        bool isDark = _settingsService.ResolveIsDarkMode();
+        Color accent = DwmInterop.GetAccentColor();
+        _contextMenu.UpdateTheme(isDark, accent);
+
         if (_flyoutForm != null && !_flyoutForm.IsDisposed)
         {
             _flyoutForm.OnThemeOrColorChanged();
@@ -362,11 +407,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void OnStartWithWindowsClicked(object? sender, EventArgs e)
+    private void OnStartWithWindowsToggled(object? sender, bool isChecked)
     {
-        if (sender is ToolStripMenuItem item)
+        AutoStartManager.SetAutoStart(isChecked);
+        if (sender is FluentToggleMenuItem item)
         {
-            AutoStartManager.SetAutoStart(item.Checked);
             item.Checked = AutoStartManager.IsAutoStartEnabled();
         }
     }
@@ -539,97 +584,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         });
     }
 
-    private async void OnTestListMonitorsClicked(object? sender, EventArgs e)
-    {
-        try
-        {
-            var monitors = await Task.Run(() => _brightnessProvider.GetMonitors());
-
-            if (monitors.Count == 0)
-            {
-                MessageBox.Show(
-                    "No monitors supporting WMI or DDC/CI were detected.",
-                    "BrightnessTray - Monitor Detection",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"Detected {monitors.Count} display(s):\n");
-
-            for (int i = 0; i < monitors.Count; i++)
-            {
-                var monitor = monitors[i];
-                sb.AppendLine($"• {monitor.Name}");
-                sb.AppendLine($"  ID: {monitor.Id}");
-                sb.AppendLine($"  Brightness: {monitor.CurrentPercent}% (raw: {monitor.CurrentBrightness}, min: {monitor.MinBrightness}, max: {monitor.MaxBrightness})");
-                sb.AppendLine();
-            }
-
-            MessageBox.Show(
-                sb.ToString().TrimEnd(),
-                "BrightnessTray - Monitor Detection",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                $"Failed to enumerate monitors: {ex.Message}",
-                "BrightnessTray - Error",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-        }
-    }
-
-    private async void OnTestSetFiftyPercentClicked(object? sender, EventArgs e)
-    {
-        try
-        {
-            var (total, successCount) = await Task.Run(() =>
-            {
-                var monitors = _brightnessProvider.GetMonitors();
-                int success = 0;
-
-                for (int i = 0; i < monitors.Count; i++)
-                {
-                    if (_brightnessProvider.TrySetBrightness(monitors[i].Id, 50))
-                    {
-                        success++;
-                    }
-                }
-
-                return (monitors.Count, success);
-            });
-
-            if (total == 0)
-            {
-                MessageBox.Show(
-                    "No supported displays found to adjust.",
-                    "BrightnessTray - Set 50%",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-            }
-            else
-            {
-                MessageBox.Show(
-                    $"Set brightness to 50% for {successCount} of {total} display(s).",
-                    "BrightnessTray - Set 50%",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                $"Failed to set brightness: {ex.Message}",
-                "BrightnessTray - Error",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-        }
-    }
-
     private void OnExitClicked(object? sender, EventArgs e)
     {
         ExitApplication();
@@ -731,6 +685,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (disposing)
             {
                 _brightnessService.BrightnessChanged -= OnBrightnessChanged;
+                SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
 
                 StopAndDisposeTooltipTimer();
                 StopAndDisposeFlyoutDisposeTimer();

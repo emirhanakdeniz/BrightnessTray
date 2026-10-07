@@ -19,6 +19,7 @@ public sealed class MonitorRowControl : Panel
     private readonly FluentLabel _monitorGlyph;
     private readonly FluentLabel _nameLabel;
     private readonly FluentLabel _pencilButton;
+    private readonly FluentLabel _chevronButton;
     private readonly FluentBadge? _softwareBadge;
     private readonly FluentLabel _brightnessGlyph;
     private readonly FluentSlider _slider;
@@ -39,6 +40,8 @@ public sealed class MonitorRowControl : Panel
     private bool _isMicaActive;
     private bool _isRowHovered;
     private bool _isEditing;
+    private bool _isExpanded = true;
+    private bool _showBottomDivider;
     private Color _accentColor = Color.FromArgb(0x00, 0x67, 0xC0);
 
     private SolidBrush? _cachedHoverBrush;
@@ -46,6 +49,21 @@ public sealed class MonitorRowControl : Panel
     public string MonitorId => _monitor.Id;
     public string DisplayName => _currentDisplayName;
     public bool IsEditing => _isEditing;
+    public bool IsExpanded => _isExpanded;
+    public bool ShowBottomDivider
+    {
+        get => _showBottomDivider;
+        set
+        {
+            if (_showBottomDivider != value)
+            {
+                _showBottomDivider = value;
+                Invalidate();
+            }
+        }
+    }
+
+    public event Action? ExpandedChanged;
 
     private float DpiScale => DeviceDpi / 96f;
     private int Scale(int pixels) => Theme.Scale(pixels, DpiScale);
@@ -95,6 +113,20 @@ public sealed class MonitorRowControl : Panel
             TabStop = false
         };
 
+        _chevronButton = new FluentLabel(gdiCache.GlyphSmallFont)
+        {
+            Text = "\uE70D", // Segoe Fluent Icons: ChevronDown
+            Dock = DockStyle.Right,
+            Width = Scale(20),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Margin = Padding.Empty,
+            TabStop = false,
+            Cursor = Cursors.Hand,
+            AccessibleName = $"Collapse {_currentDisplayName} section"
+        };
+        _chevronButton.Click += (s, e) => ToggleExpanded();
+        _topPanel.Controls.Add(_chevronButton);
+
         if (_monitor.IsSoftware)
         {
             _softwareBadge = new FluentBadge("Software", gdiCache.BadgeFont)
@@ -120,6 +152,14 @@ public sealed class MonitorRowControl : Panel
         };
         _pencilButton.Click += (s, e) => BeginInlineEdit();
         _topPanel.Controls.Add(_pencilButton);
+
+        _topPanel.Click += (s, e) =>
+        {
+            if (!_isEditing)
+            {
+                ToggleExpanded();
+            }
+        };
 
         _nameLabel = new FluentLabel(gdiCache.SecondaryFont)
         {
@@ -302,14 +342,32 @@ public sealed class MonitorRowControl : Panel
                 _pencilButton.Visible = hovered;
             }
 
-            // Low-contrast icons illuminate to primary when hovered
-            Color iconColor = hovered ? Theme.TextPrimary(_isDarkMode) : Theme.TextLowContrast(_isDarkMode);
+            Color iconColor = hovered ? Theme.TextPrimary(_isDarkMode) : Theme.TextSecondary(_isDarkMode);
             _monitorGlyph.ForeColor = iconColor;
-            _brightnessGlyph.ForeColor = iconColor;
             _pencilButton.ForeColor = iconColor;
+            _chevronButton.ForeColor = iconColor;
 
             Invalidate();
         }
+    }
+
+    public void ToggleExpanded()
+    {
+        if (_isEditing)
+        {
+            return;
+        }
+
+        _isExpanded = !_isExpanded;
+        _bottomTable.Visible = _isExpanded;
+        _chevronButton.Text = _isExpanded ? "\uE70D" : "\uE76C";
+        _chevronButton.AccessibleName = _isExpanded
+            ? $"Collapse {_currentDisplayName} section"
+            : $"Expand {_currentDisplayName} section";
+
+        Height = _isExpanded ? Scale(58) : Scale(26);
+        ExpandedChanged?.Invoke();
+        Invalidate();
     }
 
     public void BeginInlineEdit()
@@ -470,6 +528,7 @@ public sealed class MonitorRowControl : Panel
         Padding = new Padding(Theme.Space8(scale), Theme.Space4(scale), Theme.Space8(scale), Theme.Space4(scale));
         _topPanel.Height = Scale(20);
         _monitorGlyph.Width = Scale(20);
+        _chevronButton.Width = Scale(20);
         _pencilButton.Width = Scale(20);
 
         _bottomTable.Height = Scale(32);
@@ -477,13 +536,20 @@ public sealed class MonitorRowControl : Panel
         _bottomTable.ColumnStyles[2].Width = Scale(48);
 
         _slider.Height = Scale(32);
-        Height = Scale(56);
+        Height = _isExpanded ? Scale(58) : Scale(26);
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
     {
-        Color bg = DwmInterop.IsHighContrast() ? SystemColors.Window : Theme.BackgroundBase(_isDarkMode);
-        e.Graphics.Clear(bg);
+        if (!_isMicaActive)
+        {
+            Color bg = DwmInterop.IsHighContrast() ? SystemColors.Window : Theme.BackgroundBase(_isDarkMode);
+            e.Graphics.Clear(bg);
+        }
+        else
+        {
+            e.Graphics.Clear(Color.FromArgb(0, 0, 0, 0));
+        }
 
         if (_isRowHovered)
         {
@@ -499,6 +565,12 @@ public sealed class MonitorRowControl : Panel
                 g.FillPath(_cachedHoverBrush, path);
             }
         }
+
+        if (_showBottomDivider)
+        {
+            using var divPen = new Pen(Theme.BorderSubtle(_isDarkMode), 1f);
+            e.Graphics.DrawLine(divPen, Theme.Space8(DpiScale), Height - 1, Width - Theme.Space8(DpiScale), Height - 1);
+        }
     }
 
     public void UpdateTheme(bool isDark, bool isMica, Color accentColor)
@@ -507,15 +579,15 @@ public sealed class MonitorRowControl : Panel
         _isMicaActive = isMica;
         _accentColor = accentColor;
 
-        Color secondaryColor = Theme.TextSecondary(isDark);
         Color primaryColor = Theme.TextPrimary(isDark);
-        Color lowContrastColor = Theme.TextLowContrast(isDark);
+        Color secondaryColor = Theme.TextSecondary(isDark);
 
-        Color iconColor = _isRowHovered ? primaryColor : lowContrastColor;
+        Color iconColor = _isRowHovered ? primaryColor : secondaryColor;
         _monitorGlyph.UpdateTheme(isDark, isMica, iconColor);
-        _nameLabel.UpdateTheme(isDark, isMica, secondaryColor);
+        _nameLabel.UpdateTheme(isDark, isMica, primaryColor);
         _pencilButton.UpdateTheme(isDark, isMica, iconColor);
-        _brightnessGlyph.UpdateTheme(isDark, isMica, iconColor);
+        _chevronButton.UpdateTheme(isDark, isMica, iconColor);
+        _brightnessGlyph.UpdateTheme(isDark, isMica, primaryColor);
         _percentLabel.UpdateTheme(isDark, isMica, primaryColor);
 
         _softwareBadge?.UpdateTheme(isDark, isMica);
