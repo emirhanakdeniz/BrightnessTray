@@ -1,0 +1,17 @@
+=== Memory & Object Lifetime Diagnostic ===
+Baseline Idle (Flyout Not Created):
+  Working Set:    46.56 MB
+  Private Memory: 11.68 MB
+
+Flyout Opened (Create: 45 ms, First Frame: 106 ms, Total: 151 ms):
+  Working Set:    55.75 MB
+  Private Memory: 13.33 MB
+
+After Flyout Disposed & Working Set Trimmed (5s idle simulated):
+  Working Set:    1.65 MB
+  Private Memory: 15.31 MB
+
+Reopened from Teardown (Create: 11 ms, First Frame: 29 ms, Total: 40 ms):
+  Working Set:    14.55 MB
+  Private Memory: 15.38 MB
+============================================
