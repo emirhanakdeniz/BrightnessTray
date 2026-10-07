@@ -28,6 +28,7 @@ public sealed class FlyoutForm : Form
     private long _lastClosedTimestamp;
     private bool _isRefreshing;
     private bool _disposed;
+    private TaskbarEdge _currentTaskbarEdge = TaskbarEdge.Bottom;
 
     // Animation state - only created and running during active animation
     private System.Windows.Forms.Timer? _animTimer;
@@ -472,16 +473,14 @@ public sealed class FlyoutForm : Form
 
     private Point GetSlideOffsetLocation(Point baseLocation)
     {
-        int slide = Scale(12);
-        var screen = Screen.FromPoint(baseLocation);
-        var edge = DetectTaskbarEdge(screen.Bounds, screen.WorkingArea);
+        int slide = BrightnessTray.UI.Theme.FlyoutGap(DpiScale);
 
-        return edge switch
+        return _currentTaskbarEdge switch
         {
             TaskbarEdge.Top => new Point(baseLocation.X, baseLocation.Y - slide),
             TaskbarEdge.Left => new Point(baseLocation.X - slide, baseLocation.Y),
             TaskbarEdge.Right => new Point(baseLocation.X + slide, baseLocation.Y),
-            _ => new Point(baseLocation.X, baseLocation.Y + slide) // Bottom or auto-hide: slide down
+            _ => new Point(baseLocation.X, baseLocation.Y + slide) // Bottom or auto-hide: slide down toward taskbar
         };
     }
 
@@ -803,115 +802,128 @@ public sealed class FlyoutForm : Form
 
     public void PositionNearTaskbar()
     {
-        int gap = BrightnessTray.UI.Theme.Space12(DpiScale);
         Rectangle iconRect = Rectangle.Empty;
         bool hasIconRect = _notifyIcon != null && ShellInterop.TryGetNotifyIconRect(_notifyIcon, out iconRect);
 
-        Screen targetScreen;
-        if (hasIconRect)
-        {
-            var iconCenter = new Point((iconRect.Left + iconRect.Right) / 2, (iconRect.Top + iconRect.Bottom) / 2);
-            targetScreen = Screen.FromPoint(iconCenter);
-        }
-        else
-        {
-            targetScreen = Screen.FromPoint(Cursor.Position);
-        }
+        ShellInterop.TryGetTrayMonitorInfo(
+            hasIconRect ? iconRect : null,
+            Cursor.Position,
+            out Rectangle workArea,
+            out Rectangle bounds,
+            out float monitorDpiScale);
 
-        var bounds = targetScreen.Bounds;
-        var workArea = targetScreen.WorkingArea;
-        TaskbarEdge edge = DetectTaskbarEdge(bounds, workArea);
+        float dpiScale = monitorDpiScale > 0 ? monitorDpiScale : DpiScale;
+        int gap = BrightnessTray.UI.Theme.FlyoutGap(dpiScale);
+
+        // Compensate for any invisible frame / drop shadow margin from DWM so visible edges are exact
+        DwmInterop.TryGetVisibleFrameMargins(Handle, out Padding shadowMargins);
+
+        TaskbarEdge edge = DetectTaskbarEdge(bounds, workArea, iconRect, hasIconRect, Scale(60));
+        _currentTaskbarEdge = edge;
+
+        int w = Width;
+        int h = Height;
 
         int x;
         int y;
 
-        if (hasIconRect)
+        switch (edge)
         {
-            int iconCenterX = (iconRect.Left + iconRect.Right) / 2;
-            int iconCenterY = (iconRect.Top + iconRect.Bottom) / 2;
+            case TaskbarEdge.Bottom:
+                // Float 12px (scaled) above the bottom taskbar, aligned 12px (scaled) from the right screen edge
+                y = workArea.Bottom - h - gap + shadowMargins.Bottom;
+                x = workArea.Right - w - gap + shadowMargins.Right;
+                break;
 
-            // In auto-hide mode, workArea == bounds. Infer edge from iconRect proximity to screen edges
-            if (edge == TaskbarEdge.None)
-            {
-                if (iconRect.Bottom >= bounds.Bottom - Scale(60)) edge = TaskbarEdge.Bottom;
-                else if (iconRect.Top <= bounds.Top + Scale(60)) edge = TaskbarEdge.Top;
-                else if (iconRect.Left <= bounds.Left + Scale(60)) edge = TaskbarEdge.Left;
-                else if (iconRect.Right >= bounds.Right - Scale(60)) edge = TaskbarEdge.Right;
-            }
+            case TaskbarEdge.Top:
+                // Float 12px (scaled) below the top taskbar, aligned 12px (scaled) from the right screen edge
+                y = workArea.Top + gap - shadowMargins.Top;
+                x = workArea.Right - w - gap + shadowMargins.Right;
+                break;
 
-            switch (edge)
-            {
-                case TaskbarEdge.Bottom:
-                    y = Math.Min(workArea.Bottom, iconRect.Top) - Height;
-                    x = iconCenterX - Width / 2;
-                    x = Math.Clamp(x, bounds.Left + gap, bounds.Right - Width - gap);
-                    break;
+            case TaskbarEdge.Left:
+                // Float 12px (scaled) to the right of the left taskbar, vertically centered near tray icon
+                x = workArea.Left + gap - shadowMargins.Left;
+                if (hasIconRect)
+                {
+                    int iconCenterY = (iconRect.Top + iconRect.Bottom) / 2;
+                    y = iconCenterY - (h / 2);
+                }
+                else
+                {
+                    y = workArea.Bottom - h - gap + shadowMargins.Bottom;
+                }
+                break;
 
-                case TaskbarEdge.Top:
-                    y = Math.Max(workArea.Top, iconRect.Bottom);
-                    x = iconCenterX - Width / 2;
-                    x = Math.Clamp(x, bounds.Left + gap, bounds.Right - Width - gap);
-                    break;
+            case TaskbarEdge.Right:
+                // Float 12px (scaled) to the left of the right taskbar, vertically centered near tray icon
+                x = workArea.Right - w - gap + shadowMargins.Right;
+                if (hasIconRect)
+                {
+                    int iconCenterY = (iconRect.Top + iconRect.Bottom) / 2;
+                    y = iconCenterY - (h / 2);
+                }
+                else
+                {
+                    y = workArea.Bottom - h - gap + shadowMargins.Bottom;
+                }
+                break;
 
-                case TaskbarEdge.Left:
-                    x = Math.Max(workArea.Left, iconRect.Right);
-                    y = iconCenterY - Height / 2;
-                    y = Math.Clamp(y, bounds.Top + gap, bounds.Bottom - Height - gap);
-                    break;
+            default:
+                x = workArea.Right - w - gap + shadowMargins.Right;
+                y = workArea.Bottom - h - gap + shadowMargins.Bottom;
+                break;
+        }
 
-                case TaskbarEdge.Right:
-                    x = Math.Min(workArea.Right, iconRect.Left) - Width;
-                    y = iconCenterY - Height / 2;
-                    y = Math.Clamp(y, bounds.Top + gap, bounds.Bottom - Height - gap);
-                    break;
+        // Clamp within the working area bounds
+        int minX = workArea.Left + gap - shadowMargins.Left;
+        int maxX = workArea.Right - w - gap + shadowMargins.Right;
+        int minY = workArea.Top + gap - shadowMargins.Top;
+        int maxY = workArea.Bottom - h - gap + shadowMargins.Bottom;
 
-                default:
-                    x = bounds.Right - Width - gap;
-                    y = bounds.Bottom - Height - gap;
-                    break;
-            }
+        if (maxX >= minX)
+        {
+            x = Math.Clamp(x, minX, maxX);
         }
         else
         {
-            switch (edge)
-            {
-                case TaskbarEdge.Bottom:
-                    x = workArea.Right - Width - gap;
-                    y = workArea.Bottom - Height;
-                    break;
+            x = minX;
+        }
 
-                case TaskbarEdge.Top:
-                    x = workArea.Right - Width - gap;
-                    y = workArea.Top;
-                    break;
-
-                case TaskbarEdge.Left:
-                    x = workArea.Left;
-                    y = workArea.Bottom - Height - gap;
-                    break;
-
-                case TaskbarEdge.Right:
-                    x = workArea.Right - Width;
-                    y = workArea.Bottom - Height - gap;
-                    break;
-
-                default:
-                    x = bounds.Right - Width - gap;
-                    y = bounds.Bottom - Height - gap;
-                    break;
-            }
+        if (maxY >= minY)
+        {
+            y = Math.Clamp(y, minY, maxY);
+        }
+        else
+        {
+            y = minY;
         }
 
         Location = new Point(x, y);
     }
 
-    private static TaskbarEdge DetectTaskbarEdge(Rectangle bounds, Rectangle workArea)
+    private static TaskbarEdge DetectTaskbarEdge(
+        Rectangle bounds,
+        Rectangle workArea,
+        Rectangle iconRect,
+        bool hasIconRect,
+        int threshold)
     {
         if (workArea.Bottom < bounds.Bottom) return TaskbarEdge.Bottom;
         if (workArea.Top > bounds.Top) return TaskbarEdge.Top;
         if (workArea.Left > bounds.Left) return TaskbarEdge.Left;
         if (workArea.Right < bounds.Right) return TaskbarEdge.Right;
-        return TaskbarEdge.None;
+
+        // Auto-hide taskbar: workArea == bounds. Infer from tray icon position
+        if (hasIconRect)
+        {
+            if (iconRect.Bottom >= bounds.Bottom - threshold) return TaskbarEdge.Bottom;
+            if (iconRect.Top <= bounds.Top + threshold) return TaskbarEdge.Top;
+            if (iconRect.Left <= bounds.Left + threshold) return TaskbarEdge.Left;
+            if (iconRect.Right >= bounds.Right - threshold) return TaskbarEdge.Right;
+        }
+
+        return TaskbarEdge.Bottom;
     }
 
     private enum TaskbarEdge

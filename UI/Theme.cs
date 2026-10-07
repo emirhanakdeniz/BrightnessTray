@@ -12,6 +12,9 @@ public static class Theme
     public const int BaseSpace16 = 16;
     public const int BaseSpace24 = 24;
 
+    // --- Window Positioning Tokens ---
+    public const int FlyoutEdgeGap = 12;
+
     // --- Radii ---
     public const int BaseRadius4 = 4;
     public const int BaseRadius8 = 8;
@@ -24,6 +27,7 @@ public static class Theme
     public static int Space12(float dpiScale) => Scale(BaseSpace12, dpiScale);
     public static int Space16(float dpiScale) => Scale(BaseSpace16, dpiScale);
     public static int Space24(float dpiScale) => Scale(BaseSpace24, dpiScale);
+    public static int FlyoutGap(float dpiScale) => Scale(FlyoutEdgeGap, dpiScale);
 
     public static int Radius4(float dpiScale) => Math.Max(2, Scale(BaseRadius4, dpiScale));
     public static int Radius8(float dpiScale) => Math.Max(4, Scale(BaseRadius8, dpiScale));

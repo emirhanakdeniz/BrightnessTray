@@ -18,6 +18,7 @@ public static class DwmInterop
 {
     public enum DWMWINDOWATTRIBUTE
     {
+        DWMWA_EXTENDED_FRAME_BOUNDS = 9,
         DWMWA_USE_IMMERSIVE_DARK_MODE = 20,
         DWMWA_WINDOW_CORNER_PREFERENCE = 33,
         DWMWA_BORDER_COLOR = 34,
@@ -86,6 +87,16 @@ public static class DwmInterop
     public static extern int DwmExtendFrameIntoClientArea(
         IntPtr hWnd,
         ref MARGINS pMarInset);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetWindowRect(IntPtr hWnd, out ShellInterop.RECT lpRect);
+
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    public static extern int DwmGetWindowAttribute(
+        IntPtr hwnd,
+        int dwAttribute,
+        out ShellInterop.RECT pvAttribute,
+        int cbAttribute);
 
     [DllImport("ntdll.dll", SetLastError = true)]
     private static extern int RtlGetVersion(ref OSVERSIONINFOEX lpVersionInformation);
@@ -254,5 +265,47 @@ public static class DwmInterop
 
         // Fallback: #0067C0
         return Color.FromArgb(0x00, 0x67, 0xC0);
+    }
+
+    public static bool TryGetVisibleFrameMargins(IntPtr hWnd, out Padding margins)
+    {
+        margins = Padding.Empty;
+        if (hWnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (GetWindowRect(hWnd, out var winRect))
+            {
+                int hr = DwmGetWindowAttribute(
+                    hWnd,
+                    (int)DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
+                    out var frameRect,
+                    Marshal.SizeOf<ShellInterop.RECT>());
+
+                if (hr == 0)
+                {
+                    int leftMargin = frameRect.Left - winRect.Left;
+                    int topMargin = frameRect.Top - winRect.Top;
+                    int rightMargin = winRect.Right - frameRect.Right;
+                    int bottomMargin = winRect.Bottom - frameRect.Bottom;
+
+                    margins = new Padding(
+                        Math.Max(0, leftMargin),
+                        Math.Max(0, topMargin),
+                        Math.Max(0, rightMargin),
+                        Math.Max(0, bottomMargin));
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[DwmInterop] Failed to get visible frame margins: {ex.Message}");
+        }
+
+        return false;
     }
 }
