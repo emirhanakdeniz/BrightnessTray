@@ -1,3 +1,5 @@
+![BrightnessTray Banner](assets/brightnesstray-github-banner.png)
+
 # BrightnessTray
 
 A lightweight, zero-idle-CPU Windows 11 system tray application for controlling external monitor brightness via DDC/CI (Monitor Configuration API) and internal panels via WMI.
@@ -71,6 +73,8 @@ The output file will be located at `dist/BrightnessTray.exe`.
 
 ```
 BrightnessTray/
+├── assets/
+│   └── brightnesstray-github-banner.png # GitHub README banner
 ├── Controls/
 │   ├── FluentBadge.cs          # Status badges (e.g. Software/Internal)
 │   ├── FluentLabel.cs          # DPI-aware GDI+ ClearType text labels
