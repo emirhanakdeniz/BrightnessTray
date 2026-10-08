@@ -16,7 +16,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly SettingsService _settingsService;
     private readonly BrightnessService _brightnessService;
     private readonly SystemMessageListenerWindow _systemListenerWindow;
-    private readonly SynchronizationContext? _uiSyncContext;
+    private readonly SynchronizationContext _uiSyncContext;
 
     private FlyoutForm? _flyoutForm;
     private System.Windows.Forms.Timer? _flyoutDisposeTimer;
@@ -34,6 +34,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     // On-demand one-shot timer for tooltip updates while dragging slider
     private System.Windows.Forms.Timer? _tooltipThrottleTimer;
     private bool _disposed;
+    private bool _isExiting;
 
 #if DEBUG
     private bool _loggedIdleMessage;
@@ -42,7 +43,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _uiSyncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
-        _settingsService = new SettingsService();
+        _settingsService = new SettingsService(_uiSyncContext);
 
         // Detect internal laptop displays via Win32 CCD API to avoid loading WMI/System.Management on desktop PCs
         var ddcCiProvider = new DdcCiProvider();
@@ -129,7 +130,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OnThemeOrColorChanged()
     {
-        if (_disposed) return;
+        if (_disposed || _isExiting) return;
 #if DEBUG
         _loggedIdleMessage = false;
 #endif
@@ -145,7 +146,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OnDisplayChanged()
     {
-        if (_disposed) return;
+        if (_disposed || _isExiting) return;
 #if DEBUG
         _loggedIdleMessage = false;
 #endif
@@ -159,7 +160,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OnTaskbarCreated()
     {
-        if (_disposed) return;
+        if (_disposed || _isExiting) return;
 #if DEBUG
         _loggedIdleMessage = false;
 #endif
@@ -168,7 +169,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OnResumedFromSleep()
     {
-        if (_disposed) return;
+        if (_disposed || _isExiting) return;
 #if DEBUG
         _loggedIdleMessage = false;
 #endif
@@ -209,12 +210,16 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OnBrightnessChanged(string monitorId, int percent)
     {
-        lock (_monitorStateLock)
+        _uiSyncContext.Post(_ =>
         {
-            _monitorBrightnessMap[monitorId] = percent;
-        }
+            if (_disposed || _isExiting) return;
+            lock (_monitorStateLock)
+            {
+                _monitorBrightnessMap[monitorId] = percent;
+            }
 
-        ThrottleTooltipUpdate();
+            ThrottleTooltipUpdate();
+        }, null);
     }
 
     private void ThrottleTooltipUpdate()
@@ -326,6 +331,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         try
         {
+            if (_disposed || _isExiting) return;
             var monitors = await Task.Run(() => _brightnessProvider.GetMonitors());
 
             lock (_monitorStateLock)
@@ -343,6 +349,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
             _uiSyncContext?.Post(_ =>
             {
+                if (_disposed || _isExiting) return;
                 ApplyTooltipText();
                 if (!_disposed && _flyoutForm != null && !_flyoutForm.IsDisposed)
                 {
@@ -399,6 +406,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void ToggleFlyout()
     {
+        if (_disposed || _isExiting) return;
         StopAndDisposeFlyoutDisposeTimer();
 
         if (_flyoutForm != null && _flyoutForm.IsShowingOrVisible)
@@ -444,7 +452,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OnFlyoutClosed()
     {
-        if (_disposed) return;
+        if (_disposed || _isExiting) return;
         _settingsService.Flush();
         StartFlyoutDisposeTimer();
     }
@@ -491,6 +499,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void ToggleBrightnessMute()
     {
+        if (_disposed || _isExiting) return;
         _ = Task.Run(async () =>
         {
             try
@@ -537,6 +546,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 // Update flyout controls if currently open
                 _uiSyncContext?.Post(_ =>
                 {
+                    if (_disposed || _isExiting) return;
                     if (_flyoutForm != null && !_flyoutForm.IsDisposed && _flyoutForm.Visible)
                     {
                         _ = _flyoutForm.RefreshMonitorsAsync();
@@ -550,19 +560,26 @@ public sealed class TrayApplicationContext : ApplicationContext
         });
     }
 
-    private void OnExitClicked(object? sender, EventArgs e)
+    private async void OnExitClicked(object? sender, EventArgs e)
     {
-        ExitApplication();
+        await ExitApplicationAsync();
     }
 
-    private void ExitApplication()
+    private async Task ExitApplicationAsync()
     {
+        if (_disposed || _isExiting) return;
+        _isExiting = true;
+        StopAndDisposeTooltipTimer();
+        StopAndDisposeFlyoutDisposeTimer();
+
         if (_notifyIcon is not null)
         {
             _notifyIcon.Visible = false;
         }
 
         _flyoutForm?.Hide();
+        await _brightnessService.StopAsync();
+        _settingsService.Dispose();
         ExitThread();
     }
 
@@ -648,6 +665,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (!_disposed)
         {
+            _disposed = true;
             if (disposing)
             {
                 _brightnessService.BrightnessChanged -= OnBrightnessChanged;
@@ -676,9 +694,8 @@ public sealed class TrayApplicationContext : ApplicationContext
                 }
 
                 _brightnessService.Dispose();
+                _settingsService.Dispose();
             }
-
-            _disposed = true;
         }
 
         base.Dispose(disposing);

@@ -9,6 +9,9 @@ public sealed class BrightnessService : IDisposable
     private readonly SettingsService _settingsService;
     private readonly ConcurrentDictionary<string, MonitorDebounceState> _monitors = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _cts = new();
+    private readonly object _lifecycleLock = new();
+    private readonly HashSet<Task> _pendingWrites = new();
+    private Task? _shutdownTask;
     private bool _disposed;
 
     private const int DebounceMs = 120;
@@ -44,26 +47,40 @@ public sealed class BrightnessService : IDisposable
 
     public void RequestBrightness(string monitorId, int percent)
     {
-        if (_disposed || _cts.IsCancellationRequested || string.IsNullOrWhiteSpace(monitorId))
+        if (string.IsNullOrWhiteSpace(monitorId))
         {
             return;
         }
 
         int clampedPercent = Math.Clamp(percent, 0, 100);
-        var state = _monitors.GetOrAdd(monitorId, _ => new MonitorDebounceState());
-
-        CancellationToken debounceToken;
-
-        lock (state.Lock)
+        lock (_lifecycleLock)
         {
-            state.LatestPercent = clampedPercent;
-            state.DebounceCts?.Cancel();
-            state.DebounceCts?.Dispose();
-            state.DebounceCts = new CancellationTokenSource();
-            debounceToken = state.DebounceCts.Token;
+            if (_disposed) return;
+
+            var state = _monitors.GetOrAdd(monitorId, _ => new MonitorDebounceState());
+            CancellationToken debounceToken;
+            lock (state.Lock)
+            {
+                state.LatestPercent = clampedPercent;
+                state.DebounceCts?.Cancel();
+                state.DebounceCts?.Dispose();
+                state.DebounceCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                debounceToken = state.DebounceCts.Token;
+            }
+
+            // Register the operation before shutdown can take its snapshot.
+            Task writeTask = Task.Run(() => WriteDebouncedAsync(monitorId, state, debounceToken));
+            _pendingWrites.Add(writeTask);
+            _ = writeTask.ContinueWith(completed =>
+            {
+                lock (_lifecycleLock)
+                {
+                    _pendingWrites.Remove(completed);
+                }
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
-        // Notify listeners (e.g. tooltip throttler)
+        // Notify listeners (e.g. tooltip throttler).
         try
         {
             BrightnessChanged?.Invoke(monitorId, clampedPercent);
@@ -72,45 +89,39 @@ public sealed class BrightnessService : IDisposable
         {
             // Fail silently
         }
+    }
 
-        // Debounce ~120ms independently for this monitor on a background task
-        _ = Task.Run(async () =>
+    private async Task WriteDebouncedAsync(string monitorId, MonitorDebounceState state, CancellationToken debounceToken)
+    {
+        try
         {
+            await Task.Delay(DebounceMs, debounceToken).ConfigureAwait(false);
+
+            // Queued writes must also stop when superseded or shutting down.
+            await state.WriteGate.WaitAsync(debounceToken).ConfigureAwait(false);
             try
             {
-                await Task.Delay(DebounceMs, debounceToken).ConfigureAwait(false);
-
-                if (_cts.IsCancellationRequested || debounceToken.IsCancellationRequested)
-                {
-                    return;
-                }
-
+                debounceToken.ThrowIfCancellationRequested();
                 int targetPercent;
                 lock (state.Lock)
                 {
                     targetPercent = state.LatestPercent;
                 }
-
-                // Serialize writes targeting the same monitor
-                await state.WriteGate.WaitAsync(_cts.Token).ConfigureAwait(false);
-                try
-                {
-                    WriteWithRetry(monitorId, targetPercent);
-                }
-                finally
-                {
-                    state.WriteGate.Release();
-                }
+                WriteWithRetry(monitorId, targetPercent);
             }
-            catch (OperationCanceledException)
+            finally
             {
-                // Superseded by newer value in burst
+                state.WriteGate.Release();
             }
-            catch
-            {
-                // Fail silently, never crash
-            }
-        });
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded or shutting down.
+        }
+        catch
+        {
+            // Fail silently, never crash.
+        }
     }
 
     private void WriteWithRetry(string monitorId, int percent)
@@ -144,15 +155,24 @@ public sealed class BrightnessService : IDisposable
         // Silently ignore if write fails after 2 retries
     }
 
-    public void Dispose()
+    public Task StopAsync()
     {
-        if (_disposed)
+        lock (_lifecycleLock)
         {
-            return;
-        }
+            if (_shutdownTask != null) return _shutdownTask;
 
-        _disposed = true;
-        _cts.Cancel();
+            _disposed = true;
+            _cts.Cancel();
+            _shutdownTask = CompleteShutdownAsync(_pendingWrites.ToArray());
+            return _shutdownTask;
+        }
+    }
+
+    private async Task CompleteShutdownAsync(Task[] pendingWrites)
+    {
+        // Native writes cannot be canceled mid-call. Keep their resources alive
+        // until they return and record any successfully applied brightness.
+        await Task.WhenAll(pendingWrites).ConfigureAwait(false);
 
         foreach (var state in _monitors.Values)
         {
@@ -161,5 +181,10 @@ public sealed class BrightnessService : IDisposable
         _monitors.Clear();
 
         _cts.Dispose();
+    }
+
+    public void Dispose()
+    {
+        StopAsync().GetAwaiter().GetResult();
     }
 }

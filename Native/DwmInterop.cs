@@ -247,9 +247,9 @@ public static class DwmInterop
         {
             using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM");
             var value = key?.GetValue("AccentColor");
-            if (value != null)
+            if (value is int rawColor)
             {
-                uint dword = Convert.ToUInt32(value);
+                uint dword = unchecked((uint)rawColor);
                 byte r = (byte)(dword & 0xFF);
                 byte g = (byte)((dword >> 8) & 0xFF);
                 byte b = (byte)((dword >> 16) & 0xFF);

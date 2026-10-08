@@ -24,6 +24,7 @@ public sealed class SettingsService : IDisposable
         Path.Combine(SettingsDirectory, "settings.json");
 
     private readonly object _lock = new();
+    private readonly SynchronizationContext _uiSyncContext;
     private AppSettings _settings;
     private bool _isDirty;
     private System.Windows.Forms.Timer? _saveDebounceTimer;
@@ -32,7 +33,13 @@ public sealed class SettingsService : IDisposable
     public event Action<string, string?>? AliasChanged;
 
     public SettingsService()
+        : this(SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext())
     {
+    }
+
+    public SettingsService(SynchronizationContext uiSyncContext)
+    {
+        _uiSyncContext = uiSyncContext;
         _settings = LoadInternal();
     }
 
@@ -72,6 +79,7 @@ public sealed class SettingsService : IDisposable
 
         lock (_lock)
         {
+            if (_disposed) return false;
             bool hasOld = _settings.MonitorAliases.TryGetValue(monitorId, out string? oldAlias);
 
             if (string.IsNullOrWhiteSpace(sanitized))
@@ -142,6 +150,7 @@ public sealed class SettingsService : IDisposable
 
         lock (_lock)
         {
+            if (_disposed) return;
             if (_settings.MonitorBrightness.TryGetValue(monitorId, out int oldVal) && oldVal == clamped)
             {
                 return; // Only write when value actually changed
@@ -156,18 +165,28 @@ public sealed class SettingsService : IDisposable
     {
         if (_disposed) return;
         _isDirty = true;
+        _uiSyncContext.Post(_ => StartSaveTimer(), null);
+    }
 
-        if (_saveDebounceTimer == null)
+    private void StartSaveTimer()
+    {
+        lock (_lock)
         {
-            _saveDebounceTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-            _saveDebounceTimer.Tick += OnSaveDebounceTick;
-        }
-        else
-        {
-            _saveDebounceTimer.Stop();
-        }
+            // A queued callback may arrive after a flush or shutdown.
+            if (_disposed || !_isDirty) return;
 
-        _saveDebounceTimer.Start();
+            if (_saveDebounceTimer == null)
+            {
+                _saveDebounceTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+                _saveDebounceTimer.Tick += OnSaveDebounceTick;
+            }
+            else
+            {
+                _saveDebounceTimer.Stop();
+            }
+
+            _saveDebounceTimer.Start();
+        }
     }
 
     private void OnSaveDebounceTick(object? sender, EventArgs e)
@@ -244,11 +263,12 @@ public sealed class SettingsService : IDisposable
 
     public void Dispose()
     {
-        if (!_disposed)
+        lock (_lock)
         {
+            if (_disposed) return;
             _disposed = true;
-            Flush();
-            StopAndDisposeSaveTimer();
         }
+
+        Flush();
     }
 }
