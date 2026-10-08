@@ -7,6 +7,8 @@ using BrightnessTray.UI;
 
 public sealed class FluentMenuItem : ToolStripMenuItem
 {
+    private readonly DrawingResources _drawingResources = new();
+    private readonly Font _bodyFont;
     private string? _glyph;
     private bool _isDarkMode = true;
 
@@ -49,6 +51,7 @@ public sealed class FluentMenuItem : ToolStripMenuItem
             if (_isDarkMode != value)
             {
                 _isDarkMode = value;
+                _drawingResources.Clear();
                 Invalidate();
                 if (HasDropDownItems)
                 {
@@ -68,7 +71,8 @@ public sealed class FluentMenuItem : ToolStripMenuItem
         : base(text, null, onClick)
     {
         _glyph = glyph;
-        Font = FluentTypography.CreateBodyFont();
+        _bodyFont = FluentTypography.CreateBodyFont();
+        Font = _bodyFont;
     }
 
     public override Size GetPreferredSize(Size proposedSize)
@@ -118,6 +122,7 @@ public sealed class FluentMenuItem : ToolStripMenuItem
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        _drawingResources.EnsureDpi(Owner?.DeviceDpi ?? 96);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
@@ -144,8 +149,8 @@ public sealed class FluentMenuItem : ToolStripMenuItem
                 ? Color.FromArgb(22, 255, 255, 255)
                 : Color.FromArgb(14, 0, 0, 0);
 
-            using var path = Theme.CreateRoundedRectanglePath(hoverRect, radius);
-            using var brush = new SolidBrush(hoverColor);
+            var path = _drawingResources.RoundedRectangle(hoverRect, radius);
+            var brush = _drawingResources.Brush(hoverColor);
             g.FillPath(brush, path);
         }
 
@@ -160,8 +165,8 @@ public sealed class FluentMenuItem : ToolStripMenuItem
             int glyphSize = Theme.Scale(16, scale);
             var glyphRect = new Rectangle(textLeft, (itemHeight - glyphSize) / 2, glyphSize, glyphSize);
 
-            using var glyphFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphMedium);
-            FluentTypography.DrawText(g, _glyph, glyphFont, glyphRect, textColor, ContentAlignment.MiddleCenter);
+            var glyphFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphMedium);
+            _drawingResources.DrawText(g, _glyph, glyphFont, glyphRect, textColor, ContentAlignment.MiddleCenter);
 
             textLeft += glyphSize + Theme.Space12(scale);
         }
@@ -173,9 +178,9 @@ public sealed class FluentMenuItem : ToolStripMenuItem
             int chevronSize = Theme.Scale(12, scale);
             int chevronX = itemWidth - Theme.Space12(scale) - chevronSize;
             var chevronRect = new Rectangle(chevronX, (itemHeight - chevronSize) / 2, chevronSize, chevronSize);
-            using var chevronFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphSmall);
+            var chevronFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphSmall);
             Color chevronColor = Theme.TextSecondary(isDark);
-            FluentTypography.DrawText(g, "\uE76C", chevronFont, chevronRect, chevronColor, ContentAlignment.MiddleCenter);
+            _drawingResources.DrawText(g, "\uE76C", chevronFont, chevronRect, chevronColor, ContentAlignment.MiddleCenter);
             textRightPadding = Theme.Space12(scale) + chevronSize + Theme.Space8(scale);
         }
         else if (Checked)
@@ -183,9 +188,9 @@ public sealed class FluentMenuItem : ToolStripMenuItem
             int checkSize = Theme.Scale(14, scale);
             int checkX = itemWidth - Theme.Space12(scale) - checkSize;
             var checkRect = new Rectangle(checkX, (itemHeight - checkSize) / 2, checkSize, checkSize);
-            using var checkFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphSmall);
+            var checkFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphSmall);
             Color checkColor = Theme.TextPrimary(isDark);
-            FluentTypography.DrawText(g, "\uE73E", checkFont, checkRect, checkColor, ContentAlignment.MiddleCenter);
+            _drawingResources.DrawText(g, "\uE73E", checkFont, checkRect, checkColor, ContentAlignment.MiddleCenter);
             textRightPadding = Theme.Space12(scale) + checkSize + Theme.Space8(scale);
         }
 
@@ -196,6 +201,16 @@ public sealed class FluentMenuItem : ToolStripMenuItem
             itemWidth - textLeft - textRightPadding,
             itemHeight);
 
-        FluentTypography.DrawText(g, Text ?? string.Empty, Font, textRect, textColor, ContentAlignment.MiddleLeft);
+        _drawingResources.DrawText(g, Text ?? string.Empty, Font, textRect, textColor, ContentAlignment.MiddleLeft);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing)
+        {
+            _drawingResources.Dispose();
+            _bodyFont.Dispose();
+        }
     }
 }

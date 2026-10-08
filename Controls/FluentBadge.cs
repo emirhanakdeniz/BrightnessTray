@@ -3,9 +3,12 @@ namespace BrightnessTray.Controls;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using BrightnessTray.UI;
 
 public sealed class FluentBadge : Control
 {
+    private readonly DrawingResources _drawingResources = new();
+    private readonly Font? _ownedFont;
     private bool _isDarkMode = true;
     private bool _isMicaActive;
 
@@ -21,7 +24,8 @@ public sealed class FluentBadge : Control
             ControlStyles.SupportsTransparentBackColor, true);
 
         BackColor = Color.Transparent;
-        Font = font ?? FluentTypography.CreateBadgeFont();
+        _ownedFont = font == null ? FluentTypography.CreateBadgeFont() : null;
+        Font = font ?? _ownedFont!;
         UpdateSize();
     }
 
@@ -49,6 +53,7 @@ public sealed class FluentBadge : Control
 
     public void UpdateTheme(bool isDark, bool isMica)
     {
+        _drawingResources.Clear();
         _isDarkMode = isDark;
         _isMicaActive = isMica;
         Invalidate();
@@ -61,6 +66,7 @@ public sealed class FluentBadge : Control
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        _drawingResources.EnsureDpi(DeviceDpi);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
@@ -75,13 +81,10 @@ public sealed class FluentBadge : Control
             ? Color.FromArgb(200, 200, 200)
             : Color.FromArgb(85, 85, 85);
 
-        using (var path = CreateRoundedRectanglePath(rect, cornerRadius))
-        {
-            using var brush = new SolidBrush(pillBg);
-            g.FillPath(brush, path);
-        }
+        var path = _drawingResources.RoundedRectangle(rect, cornerRadius);
+        g.FillPath(_drawingResources.Brush(pillBg), path);
 
-        FluentTypography.DrawText(
+        _drawingResources.DrawText(
             g,
             Text,
             Font,
@@ -90,20 +93,20 @@ public sealed class FluentBadge : Control
             ContentAlignment.MiddleCenter);
     }
 
-    private static GraphicsPath CreateRoundedRectanglePath(Rectangle rect, int radius)
+    protected override void OnDpiChangedAfterParent(EventArgs e)
     {
-        var path = new GraphicsPath();
-        int diameter = radius * 2;
-        var arc = new Rectangle(rect.Location, new Size(diameter, diameter));
+        base.OnDpiChangedAfterParent(e);
+        _drawingResources.Clear();
+        UpdateSize();
+    }
 
-        path.AddArc(arc, 180, 90);
-        arc.X = rect.Right - diameter;
-        path.AddArc(arc, 270, 90);
-        arc.Y = rect.Bottom - diameter;
-        path.AddArc(arc, 0, 90);
-        arc.X = rect.Left;
-        path.AddArc(arc, 90, 90);
-        path.CloseFigure();
-        return path;
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing)
+        {
+            _drawingResources.Dispose();
+            _ownedFont?.Dispose();
+        }
     }
 }

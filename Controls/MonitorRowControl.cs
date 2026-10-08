@@ -44,7 +44,8 @@ public sealed class MonitorRowControl : Panel
     private bool _showBottomDivider;
     private Color _accentColor = Color.FromArgb(0x00, 0x67, 0xC0);
 
-    private SolidBrush? _cachedHoverBrush;
+    private readonly DrawingResources _drawingResources = new();
+    private readonly Font _editorFont;
 
     public string MonitorId => _monitor.Id;
     public string DisplayName => _currentDisplayName;
@@ -81,6 +82,7 @@ public sealed class MonitorRowControl : Panel
         _displayIndex = displayIndex;
         _brightnessService = brightnessService;
         _settingsService = settingsService;
+        _editorFont = gdiCache.SecondaryFont;
         _onEditingStateChanged = onEditingStateChanged;
         _onRenamed = onRenamed;
 
@@ -406,7 +408,7 @@ public sealed class MonitorRowControl : Panel
         _inlineTextBox = new TextBox
         {
             BorderStyle = BorderStyle.None,
-            Font = FluentTypography.CreateSecondaryFont(),
+            Font = _editorFont,
             BackColor = fieldBg,
             ForeColor = textColor,
             Text = _currentDisplayName,
@@ -419,7 +421,7 @@ public sealed class MonitorRowControl : Panel
         {
             var g = pe.Graphics;
             int lineY = _inlineContainer.Height - 1;
-            using var accentPen = new Pen(_accentColor, 2f);
+            var accentPen = _drawingResources.Pen(_accentColor, 2f);
             g.DrawLine(accentPen, 0, lineY, _inlineContainer.Width, lineY);
         };
 
@@ -532,6 +534,7 @@ public sealed class MonitorRowControl : Panel
 
     private void ApplyDpiMetrics()
     {
+        _drawingResources.Clear();
         float scale = DpiScale;
         Padding = new Padding(Theme.Space8(scale), Theme.Space4(scale), Theme.Space8(scale), Theme.Space4(scale));
         _topPanel.Height = Scale(20);
@@ -549,6 +552,7 @@ public sealed class MonitorRowControl : Panel
 
     protected override void OnPaintBackground(PaintEventArgs e)
     {
+        _drawingResources.EnsureDpi(DeviceDpi);
         if (!_isMicaActive)
         {
             Color bg = DwmInterop.IsHighContrast() ? SystemColors.Window : Theme.BackgroundBase(_isDarkMode);
@@ -567,22 +571,20 @@ public sealed class MonitorRowControl : Panel
             int radius = Theme.Radius8(DpiScale);
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
 
-            using var path = Theme.CreateRoundedRectanglePath(rect, radius);
-            if (_cachedHoverBrush != null)
-            {
-                g.FillPath(_cachedHoverBrush, path);
-            }
+            var path = _drawingResources.RoundedRectangle(rect, radius);
+            g.FillPath(_drawingResources.Brush(Theme.HoverOverlay(_isDarkMode)), path);
         }
 
         if (_showBottomDivider)
         {
-            using var divPen = new Pen(Theme.BorderSubtle(_isDarkMode), 1f);
+            var divPen = _drawingResources.Pen(Theme.BorderSubtle(_isDarkMode), 1f);
             e.Graphics.DrawLine(divPen, Theme.Space8(DpiScale), Height - 1, Width - Theme.Space8(DpiScale), Height - 1);
         }
     }
 
     public void UpdateTheme(bool isDark, bool isMica, Color accentColor)
     {
+        _drawingResources.Clear();
         _isDarkMode = isDark;
         _isMicaActive = isMica;
         _accentColor = accentColor;
@@ -600,10 +602,6 @@ public sealed class MonitorRowControl : Panel
 
         _softwareBadge?.UpdateTheme(isDark, isMica);
         _slider.UpdateTheme(isDark, isMica, accentColor);
-
-        Color highlightColor = Theme.HoverOverlay(isDark);
-        _cachedHoverBrush?.Dispose();
-        _cachedHoverBrush = new SolidBrush(highlightColor);
 
         Invalidate();
     }
@@ -642,8 +640,7 @@ public sealed class MonitorRowControl : Panel
         {
             UnhookEvents(this);
             _slider.ValueChanged -= OnSliderValueChanged;
-            _cachedHoverBrush?.Dispose();
-            _cachedHoverBrush = null;
+            _drawingResources.Dispose();
 
             _nameContextMenu.Dispose();
             CleanupInlineEditor();

@@ -2,9 +2,11 @@ namespace BrightnessTray.Controls;
 
 using System.Drawing;
 using System.Windows.Forms;
+using BrightnessTray.UI;
 
 public sealed class FluentLabel : Control
 {
+    private readonly DrawingResources _drawingResources = new();
     private ContentAlignment _textAlign = ContentAlignment.MiddleLeft;
     private bool _autoEllipsis;
     private bool _isMicaActive;
@@ -56,6 +58,7 @@ public sealed class FluentLabel : Control
 
     public void UpdateTheme(bool isDark, bool isMica, Color foreColor)
     {
+        _drawingResources.Clear();
         _isDarkMode = isDark;
         _isMicaActive = isMica;
         ForeColor = foreColor;
@@ -80,7 +83,8 @@ public sealed class FluentLabel : Control
             return;
         }
 
-        FluentTypography.DrawText(
+        _drawingResources.EnsureDpi(DeviceDpi);
+        _drawingResources.DrawText(
             e.Graphics,
             Text,
             Font,
@@ -88,5 +92,17 @@ public sealed class FluentLabel : Control
             ForeColor,
             TextAlign,
             AutoEllipsis);
+    }
+
+    protected override void OnForeColorChanged(EventArgs e)
+    {
+        _drawingResources.Clear();
+        base.OnForeColorChanged(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _drawingResources.Dispose();
+        base.Dispose(disposing);
     }
 }

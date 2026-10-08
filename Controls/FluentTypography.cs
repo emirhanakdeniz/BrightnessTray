@@ -100,15 +100,16 @@ public static class FluentTypography
         }
 
         using var brush = new SolidBrush(color);
-        using var sf = new StringFormat(StringFormat.GenericTypographic)
-        {
-            FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces
-        };
+        using var sf = new StringFormat(StringFormat.GenericTypographic);
+        DrawText(g, text, font, bounds, brush, sf, align, autoEllipsis);
+    }
 
-        if (autoEllipsis)
-        {
-            sf.Trimming = StringTrimming.EllipsisCharacter;
-        }
+    internal static void DrawText(Graphics g, string text, Font font, Rectangle bounds,
+        SolidBrush brush, StringFormat sf, ContentAlignment align, bool autoEllipsis)
+    {
+        if (string.IsNullOrEmpty(text) || bounds.Width <= 0 || bounds.Height <= 0) return;
+        sf.FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces;
+        sf.Trimming = autoEllipsis ? StringTrimming.EllipsisCharacter : StringTrimming.None;
 
         switch (align)
         {

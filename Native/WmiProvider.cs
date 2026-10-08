@@ -4,6 +4,8 @@ using System.Management;
 
 public class WmiProvider : IBrightnessProvider
 {
+    private const int MaxAttempts = 3;
+    private const int RetryDelayMs = 50;
     private readonly ManagementScope _wmiScope = new(@"root\WMI");
 
     public IReadOnlyList<MonitorInfo> GetMonitors()
@@ -76,7 +78,17 @@ public class WmiProvider : IBrightnessProvider
         }
 
         int clampedPercent = Math.Clamp(percent, 0, 100);
+        for (int attempt = 0; attempt < MaxAttempts; attempt++)
+        {
+            if (TrySetBrightnessOnce(monitorId, clampedPercent)) return true;
+            if (attempt < MaxAttempts - 1) Thread.Sleep(RetryDelayMs);
+        }
 
+        return false;
+    }
+
+    private bool TrySetBrightnessOnce(string monitorId, int clampedPercent)
+    {
         try
         {
             using var searcher = new ManagementObjectSearcher(_wmiScope, new SelectQuery("WmiMonitorBrightnessMethods"));
@@ -93,7 +105,7 @@ public class WmiProvider : IBrightnessProvider
                         inParams["Timeout"] = 1u; // 1 second timeout
                         inParams["Brightness"] = (byte)clampedPercent;
 
-                        mo.InvokeMethod("WmiSetBrightness", inParams, null);
+                        using var result = mo.InvokeMethod("WmiSetBrightness", inParams, null);
                         return true;
                     }
                 }

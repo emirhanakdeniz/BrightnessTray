@@ -19,7 +19,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly SynchronizationContext _uiSyncContext;
 
     private FlyoutForm? _flyoutForm;
-    private System.Windows.Forms.Timer? _flyoutDisposeTimer;
+    private long _lastFlyoutClosedTimestamp;
 
     private readonly object _monitorStateLock = new();
     private readonly Dictionary<string, int> _monitorBrightnessMap = new(StringComparer.OrdinalIgnoreCase);
@@ -407,7 +407,6 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void ToggleFlyout()
     {
         if (_disposed || _isExiting) return;
-        StopAndDisposeFlyoutDisposeTimer();
 
         if (_flyoutForm != null && _flyoutForm.IsShowingOrVisible)
         {
@@ -416,6 +415,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         if (_flyoutForm != null && !_flyoutForm.CanReopen())
+        {
+            return;
+        }
+
+        if (_lastFlyoutClosedTimestamp != 0 &&
+            Stopwatch.GetElapsedTime(_lastFlyoutClosedTimestamp).TotalMilliseconds < 200)
         {
             return;
         }
@@ -453,32 +458,18 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void OnFlyoutClosed()
     {
         if (_disposed || _isExiting) return;
+        _lastFlyoutClosedTimestamp = Stopwatch.GetTimestamp();
         _settingsService.Flush();
-        StartFlyoutDisposeTimer();
-    }
-
-    private void StartFlyoutDisposeTimer()
-    {
-        StopAndDisposeFlyoutDisposeTimer();
-        _flyoutDisposeTimer = new System.Windows.Forms.Timer { Interval = 5000 };
-        _flyoutDisposeTimer.Tick += OnFlyoutDisposeTimerTick;
-        _flyoutDisposeTimer.Start();
-    }
-
-    private void StopAndDisposeFlyoutDisposeTimer()
-    {
-        if (_flyoutDisposeTimer != null)
+        var closedFlyout = _flyoutForm;
+        // Dispose after the close event returns, without a hidden retention timer.
+        _uiSyncContext.Post(_ =>
         {
-            _flyoutDisposeTimer.Stop();
-            _flyoutDisposeTimer.Tick -= OnFlyoutDisposeTimerTick;
-            _flyoutDisposeTimer.Dispose();
-            _flyoutDisposeTimer = null;
-        }
+            if (ReferenceEquals(_flyoutForm, closedFlyout)) DisposeClosedFlyout();
+        }, null);
     }
 
-    private void OnFlyoutDisposeTimerTick(object? sender, EventArgs e)
+    private void DisposeClosedFlyout()
     {
-        StopAndDisposeFlyoutDisposeTimer();
         if (_disposed) return;
 
         if (_flyoutForm != null && !_flyoutForm.IsShowingOrVisible)
@@ -488,11 +479,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _flyoutForm.Dispose();
             _flyoutForm = null;
 
-            GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
-            MemoryInterop.TrimWorkingSet();
-
 #if DEBUG
-            Debug.WriteLine("[FlyoutLifecycle] FlyoutForm disposed after 5s idle; memory trimmed.");
+            Debug.WriteLine("[FlyoutLifecycle] Closed FlyoutForm disposed.");
 #endif
         }
     }
@@ -570,7 +558,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (_disposed || _isExiting) return;
         _isExiting = true;
         StopAndDisposeTooltipTimer();
-        StopAndDisposeFlyoutDisposeTimer();
 
         if (_notifyIcon is not null)
         {
@@ -620,12 +607,12 @@ public sealed class TrayApplicationContext : ApplicationContext
             Thread.Sleep(10);
         }
 
-        // 3. Trigger 5-second disposal timer tick immediately
-        OnFlyoutDisposeTimerTick(null, EventArgs.Empty);
+        // 3. Drain the queued disposal after the close animation.
+        DisposeClosedFlyout();
         Application.DoEvents();
 
         proc.Refresh();
-        sb.AppendLine($"\nAfter Flyout Disposed & Working Set Trimmed (5s idle simulated):");
+        sb.AppendLine($"\nAfter Flyout Disposed (without forced collection or working-set trimming):");
         sb.AppendLine($"  Working Set:    {proc.WorkingSet64 / 1024.0 / 1024.0:F2} MB");
         sb.AppendLine($"  Private Memory: {proc.PrivateMemorySize64 / 1024.0 / 1024.0:F2} MB");
 
@@ -654,7 +641,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             Application.DoEvents();
             Thread.Sleep(10);
         }
-        OnFlyoutDisposeTimerTick(null, EventArgs.Empty);
+        DisposeClosedFlyout();
         Application.DoEvents();
         sb.AppendLine("============================================");
 
@@ -672,7 +659,6 @@ public sealed class TrayApplicationContext : ApplicationContext
                 SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
 
                 StopAndDisposeTooltipTimer();
-                StopAndDisposeFlyoutDisposeTimer();
                 _systemListenerWindow.Dispose();
 
                 if (_notifyIcon is not null)

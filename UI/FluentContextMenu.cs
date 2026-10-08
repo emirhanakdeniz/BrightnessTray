@@ -127,4 +127,10 @@ public sealed class FluentContextMenu : ContextMenuStrip
             Invalidate();
         }
     }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing) _fluentRenderer.Dispose();
+    }
 }

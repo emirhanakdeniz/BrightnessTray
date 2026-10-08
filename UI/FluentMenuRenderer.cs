@@ -5,21 +5,32 @@ using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using BrightnessTray.Controls;
 
-public sealed class FluentMenuRenderer : ToolStripRenderer
+public sealed class FluentMenuRenderer : ToolStripRenderer, IDisposable
 {
+    private readonly DrawingResources _drawingResources = new();
     private bool _isDarkMode = true;
     private Color _accentColor = Color.FromArgb(0x00, 0x67, 0xC0);
 
     public bool IsDarkMode
     {
         get => _isDarkMode;
-        set => _isDarkMode = value;
+        set
+        {
+            if (_isDarkMode == value) return;
+            _isDarkMode = value;
+            _drawingResources.Clear();
+        }
     }
 
     public Color AccentColor
     {
         get => _accentColor;
-        set => _accentColor = value;
+        set
+        {
+            if (_accentColor == value) return;
+            _accentColor = value;
+            _drawingResources.Clear();
+        }
     }
 
     public FluentMenuRenderer(bool isDarkMode, Color accentColor)
@@ -30,6 +41,7 @@ public sealed class FluentMenuRenderer : ToolStripRenderer
 
     public void UpdateTheme(bool isDarkMode, Color accentColor)
     {
+        _drawingResources.Clear();
         _isDarkMode = isDarkMode;
         _accentColor = accentColor;
     }
@@ -38,6 +50,7 @@ public sealed class FluentMenuRenderer : ToolStripRenderer
 
     protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
     {
+        _drawingResources.EnsureDpi(e.ToolStrip.DeviceDpi);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
@@ -46,24 +59,26 @@ public sealed class FluentMenuRenderer : ToolStripRenderer
             ? Color.FromArgb(43, 43, 43)
             : Color.FromArgb(249, 249, 249);
 
-        using var brush = new SolidBrush(bgColor);
+        var brush = _drawingResources.Brush(bgColor);
         g.FillRectangle(brush, e.AffectedBounds);
     }
 
     protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
     {
+        _drawingResources.EnsureDpi(e.ToolStrip.DeviceDpi);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
         // 1px subtle border matching Windows 11 menu flyouts
         Color borderColor = Theme.BorderSubtle(_isDarkMode);
-        using var pen = new Pen(borderColor, 1f);
+        var pen = _drawingResources.Pen(borderColor, 1f);
         var rect = new Rectangle(0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
         g.DrawRectangle(pen, rect);
     }
 
     protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
     {
+        _drawingResources.EnsureDpi(e.ToolStrip?.DeviceDpi ?? 96);
         if (!e.Item.Selected || !e.Item.Enabled)
         {
             return;
@@ -90,13 +105,14 @@ public sealed class FluentMenuRenderer : ToolStripRenderer
             ? Color.FromArgb(22, 255, 255, 255)
             : Color.FromArgb(14, 0, 0, 0);
 
-        using var path = Theme.CreateRoundedRectanglePath(rect, radius);
-        using var brush = new SolidBrush(hoverColor);
+        var path = _drawingResources.RoundedRectangle(rect, radius);
+        var brush = _drawingResources.Brush(hoverColor);
         g.FillPath(brush, path);
     }
 
     protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
     {
+        _drawingResources.EnsureDpi(e.ToolStrip?.DeviceDpi ?? 96);
         var g = e.Graphics;
         float dpiScale = (e.ToolStrip?.DeviceDpi ?? 96) / 96f;
         int marginH = Theme.Space12(dpiScale);
@@ -105,7 +121,7 @@ public sealed class FluentMenuRenderer : ToolStripRenderer
         int y = itemHeight / 2;
 
         Color sepColor = Theme.BorderSubtle(_isDarkMode);
-        using var pen = new Pen(sepColor, 1f);
+        var pen = _drawingResources.Pen(sepColor, 1f);
         g.DrawLine(pen, marginH, y, itemWidth - marginH, y);
     }
 
@@ -124,4 +140,6 @@ public sealed class FluentMenuRenderer : ToolStripRenderer
         TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
         TextRenderer.DrawText(e.Graphics, e.Text, e.TextFont, e.TextRectangle, textColor, flags);
     }
+
+    public void Dispose() => _drawingResources.Dispose();
 }

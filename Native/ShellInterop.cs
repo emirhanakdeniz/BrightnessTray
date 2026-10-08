@@ -59,6 +59,9 @@ public static class ShellInterop
     }
 
     private const uint MONITOR_DEFAULTTONEAREST = 2;
+    // NotifyIcon has no public HWND/ID API. Keep this .NET 8 fallback isolated here.
+    private static readonly FieldInfo? NotifyIconWindowField = typeof(NotifyIcon).GetField("_window", BindingFlags.NonPublic | BindingFlags.Instance);
+    private static readonly FieldInfo? NotifyIconIdField = typeof(NotifyIcon).GetField("_id", BindingFlags.NonPublic | BindingFlags.Instance);
 
     [DllImport("user32.dll")]
     public static extern IntPtr MonitorFromRect(ref RECT lprc, uint dwFlags);
@@ -92,18 +95,15 @@ public static class ShellInterop
 
         try
         {
-            var windowField = typeof(NotifyIcon).GetField("window", BindingFlags.NonPublic | BindingFlags.Instance);
-            var idField = typeof(NotifyIcon).GetField("id", BindingFlags.NonPublic | BindingFlags.Instance);
-
-            if (windowField?.GetValue(notifyIcon) is NativeWindow window &&
-                idField?.GetValue(notifyIcon) is int id &&
+            if (NotifyIconWindowField?.GetValue(notifyIcon) is NativeWindow window &&
+                NotifyIconIdField?.GetValue(notifyIcon) is uint id &&
                 window.Handle != IntPtr.Zero)
             {
                 var identifier = new NOTIFYICONIDENTIFIER
                 {
                     cbSize = (uint)Marshal.SizeOf<NOTIFYICONIDENTIFIER>(),
                     hWnd = window.Handle,
-                    uID = (uint)id,
+                    uID = id,
                     guidItem = Guid.Empty
                 };
 

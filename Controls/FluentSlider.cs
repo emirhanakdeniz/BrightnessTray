@@ -9,6 +9,7 @@ using BrightnessTray.UI;
 
 public sealed class FluentSlider : Control
 {
+    private readonly DrawingResources _drawingResources = new();
     private int _value;
     private double _visualValue;
     private int _minimum = 0;
@@ -148,6 +149,7 @@ public sealed class FluentSlider : Control
 
     private void DisposeCachedGdiResources()
     {
+        _drawingResources.Clear();
         _unfilledPen?.Dispose();
         _unfilledPen = null;
         _filledPen?.Dispose();
@@ -190,6 +192,7 @@ public sealed class FluentSlider : Control
         int thumbX = trackLeft + (int)Math.Round(ratio * trackWidth);
 
         EnsureGdiResources(scale, trackHeight);
+        _drawingResources.EnsureDpi(DeviceDpi);
 
         // 1. Draw unfilled track segment across the span
         if (_unfilledPen != null)
@@ -209,23 +212,17 @@ public sealed class FluentSlider : Control
         var outerRect = new RectangleF(outerX, outerY, thumbSize, thumbSize);
 
         // Soft elevation drop shadow
-        using (var shadowBrush = new SolidBrush(Color.FromArgb(_isDarkMode ? 45 : 28, 0, 0, 0)))
-        {
-            g.FillEllipse(shadowBrush, outerX, outerY + 1f, thumbSize, thumbSize);
-        }
+        var shadowBrush = _drawingResources.Brush(Color.FromArgb(_isDarkMode ? 45 : 28, 0, 0, 0));
+        g.FillEllipse(shadowBrush, outerX, outerY + 1f, thumbSize, thumbSize);
 
         // Pure white thumb circle
-        using (var whiteBrush = new SolidBrush(Color.White))
-        {
-            g.FillEllipse(whiteBrush, outerRect);
-        }
+        var whiteBrush = _drawingResources.Brush(Color.White);
+        g.FillEllipse(whiteBrush, outerRect);
 
         // Subtle 1px elevation border
         Color borderRingColor = _isDarkMode ? Color.FromArgb(70, 255, 255, 255) : Color.FromArgb(32, 0, 0, 0);
-        using (var ringPen = new Pen(borderRingColor, 1f))
-        {
-            g.DrawEllipse(ringPen, outerRect.X + 0.5f, outerRect.Y + 0.5f, outerRect.Width - 1f, outerRect.Height - 1f);
-        }
+        var ringPen = _drawingResources.Pen(borderRingColor, 1f);
+        g.DrawEllipse(ringPen, outerRect.X + 0.5f, outerRect.Y + 0.5f, outerRect.Width - 1f, outerRect.Height - 1f);
 
         // Inner accent dot (System Accent Color, e.g. #0067C0)
         int dotDiameter = _isDragging
@@ -251,7 +248,7 @@ public sealed class FluentSlider : Control
                 outerRect.Width + 2 * focusOffset,
                 outerRect.Height + 2 * focusOffset);
 
-            using var focusPen = new Pen(_accentColor, 1.5f);
+            var focusPen = _drawingResources.Pen(_accentColor, 1.5f);
             g.DrawEllipse(focusPen, focusRect);
         }
     }

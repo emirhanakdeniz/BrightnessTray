@@ -16,8 +16,6 @@ public sealed class BrightnessService : IDisposable
     private bool _disposed;
 
     private const int DebounceMs = 120;
-    private const int MaxRetries = 2;
-    private const int RetryDelayMs = 50;
 
     public event Action<string, int>? BrightnessChanged;
 
@@ -140,7 +138,7 @@ public sealed class BrightnessService : IDisposable
                 {
                     targetPercent = state.LatestPercent;
                 }
-                WriteWithRetry(monitorId, targetPercent);
+                WriteBrightness(monitorId, targetPercent);
             }
             finally
             {
@@ -157,35 +155,15 @@ public sealed class BrightnessService : IDisposable
         }
     }
 
-    private void WriteWithRetry(string monitorId, int percent)
+    private void WriteBrightness(string monitorId, int percent)
     {
-        for (int attempt = 0; attempt <= MaxRetries; attempt++)
+        if (_cts.IsCancellationRequested) return;
+
+        // Providers own their bounded hardware retries; do not multiply them here.
+        if (_brightnessProvider.TrySetBrightness(monitorId, percent))
         {
-            if (_cts.IsCancellationRequested)
-            {
-                return;
-            }
-
-            if (_brightnessProvider.TrySetBrightness(monitorId, percent))
-            {
-                // Persist the successfully written brightness value
-                _settingsService.SetBrightness(monitorId, percent);
-                return;
-            }
-
-            if (attempt < MaxRetries)
-            {
-                try
-                {
-                    Thread.Sleep(RetryDelayMs);
-                }
-                catch (ThreadInterruptedException)
-                {
-                    return;
-                }
-            }
+            _settingsService.SetBrightness(monitorId, percent);
         }
-        // Silently ignore if write fails after 2 retries
     }
 
     public Task StopAsync()

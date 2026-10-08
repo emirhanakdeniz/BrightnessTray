@@ -7,6 +7,8 @@ using BrightnessTray.UI;
 
 public sealed class FluentToggleMenuItem : ToolStripMenuItem
 {
+    private readonly DrawingResources _drawingResources = new();
+    private readonly Font _bodyFont;
     private string? _glyph;
     private bool _isDarkMode = true;
     private bool _isChecked;
@@ -48,6 +50,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
             if (_isDarkMode != value)
             {
                 _isDarkMode = value;
+                _drawingResources.Clear();
                 Invalidate();
             }
         }
@@ -61,6 +64,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
             if (_accentColor != value)
             {
                 _accentColor = value;
+                _drawingResources.Clear();
                 Invalidate();
             }
         }
@@ -71,7 +75,8 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
     {
         _glyph = glyph;
         _isChecked = isChecked;
-        Font = FluentTypography.CreateBodyFont();
+        _bodyFont = FluentTypography.CreateBodyFont();
+        Font = _bodyFont;
     }
 
     public override Size GetPreferredSize(Size proposedSize)
@@ -96,6 +101,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        _drawingResources.EnsureDpi(Owner?.DeviceDpi ?? 96);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
@@ -123,8 +129,8 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
                 ? Color.FromArgb(22, 255, 255, 255)
                 : Color.FromArgb(14, 0, 0, 0);
 
-            using var path = Theme.CreateRoundedRectanglePath(hoverRect, radius);
-            using var brush = new SolidBrush(hoverColor);
+            var path = _drawingResources.RoundedRectangle(hoverRect, radius);
+            var brush = _drawingResources.Brush(hoverColor);
             g.FillPath(brush, path);
         }
 
@@ -139,8 +145,8 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
             int glyphSize = Theme.Scale(16, scale);
             var glyphRect = new Rectangle(textLeft, (itemHeight - glyphSize) / 2, glyphSize, glyphSize);
 
-            using var glyphFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphMedium);
-            FluentTypography.DrawText(g, _glyph, glyphFont, glyphRect, textColor, ContentAlignment.MiddleCenter);
+            var glyphFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphMedium);
+            _drawingResources.DrawText(g, _glyph, glyphFont, glyphRect, textColor, ContentAlignment.MiddleCenter);
 
             textLeft += glyphSize + Theme.Space12(scale);
         }
@@ -153,52 +159,50 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
         var toggleRect = new Rectangle(toggleX, toggleY, toggleWidth, toggleHeight);
         int toggleRadius = toggleHeight / 2;
 
-        using (var pillPath = Theme.CreateRoundedRectanglePath(toggleRect, toggleRadius))
+        var pillPath = _drawingResources.RoundedRectangle(toggleRect, toggleRadius);
+        if (_isChecked)
         {
-            if (_isChecked)
-            {
-                // Active state: Windows Accent Blue fill
-                using var fillBrush = new SolidBrush(accent);
-                g.FillPath(fillBrush, pillPath);
+            // Active state: Windows Accent Blue fill
+            var fillBrush = _drawingResources.Brush(accent);
+            g.FillPath(fillBrush, pillPath);
 
-                // Circular white knob on the right
-                int knobPad = Theme.Scale(3, scale);
-                int knobSize = toggleHeight - knobPad * 2;
-                int knobX = toggleX + toggleWidth - knobPad - knobSize;
-                int knobY = toggleY + knobPad;
+            // Circular white knob on the right
+            int knobPad = Theme.Scale(3, scale);
+            int knobSize = toggleHeight - knobPad * 2;
+            int knobX = toggleX + toggleWidth - knobPad - knobSize;
+            int knobY = toggleY + knobPad;
 
-                using var knobBrush = new SolidBrush(Color.White);
-                g.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);
-            }
-            else
-            {
-                // Inactive state: subtle border and neutral dark/light background
-                Color offTrackBg = isDark
-                    ? Color.FromArgb(32, 32, 32)
-                    : Color.FromArgb(235, 235, 235);
-                Color offBorderColor = isDark
-                    ? Color.FromArgb(120, 120, 120)
-                    : Color.FromArgb(160, 160, 160);
+            var knobBrush = _drawingResources.Brush(Color.White);
+            g.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);
+        }
+        else
+        {
+            // Inactive state: subtle border and neutral dark/light background
+            Color offTrackBg = isDark
+                ? Color.FromArgb(32, 32, 32)
+                : Color.FromArgb(235, 235, 235);
+            Color offBorderColor = isDark
+                ? Color.FromArgb(120, 120, 120)
+                : Color.FromArgb(160, 160, 160);
 
-                using var trackBrush = new SolidBrush(offTrackBg);
-                g.FillPath(trackBrush, pillPath);
+            var trackBrush = _drawingResources.Brush(offTrackBg);
+            g.FillPath(trackBrush, pillPath);
 
-                using var borderPen = new Pen(offBorderColor, 1.5f);
-                g.DrawPath(borderPen, pillPath);
+            var borderPen = _drawingResources.Pen(offBorderColor, 1.5f);
+            g.DrawPath(borderPen, pillPath);
 
-                // Circular muted knob on the left
-                int knobPad = Theme.Scale(3, scale);
-                int knobSize = toggleHeight - knobPad * 2;
-                int knobX = toggleX + knobPad;
-                int knobY = toggleY + knobPad;
+            // Circular muted knob on the left
+            int knobPad = Theme.Scale(3, scale);
+            int knobSize = toggleHeight - knobPad * 2;
+            int knobX = toggleX + knobPad;
+            int knobY = toggleY + knobPad;
 
-                Color knobColor = isDark
-                    ? Color.FromArgb(200, 200, 200)
-                    : Color.FromArgb(90, 90, 90);
+            Color knobColor = isDark
+                ? Color.FromArgb(200, 200, 200)
+                : Color.FromArgb(90, 90, 90);
 
-                using var knobBrush = new SolidBrush(knobColor);
-                g.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);
-            }
+            var knobBrush = _drawingResources.Brush(knobColor);
+            g.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);
         }
 
         // 3. Draw item text between glyph and toggle
@@ -209,6 +213,16 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
             availableTextWidth,
             itemHeight);
 
-        FluentTypography.DrawText(g, Text ?? string.Empty, Font, textRect, textColor, ContentAlignment.MiddleLeft);
+        _drawingResources.DrawText(g, Text ?? string.Empty, Font, textRect, textColor, ContentAlignment.MiddleLeft);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing)
+        {
+            _drawingResources.Dispose();
+            _bodyFont.Dispose();
+        }
     }
 }
