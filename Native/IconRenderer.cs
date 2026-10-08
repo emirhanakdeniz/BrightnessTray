@@ -9,7 +9,6 @@ using Microsoft.Win32;
 public static class IconRenderer
 {
     private const int SM_CXSMICON = 49;
-    private const int SM_CYSMICON = 50;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetSystemMetricsForDpi(int nIndex, uint dpi);

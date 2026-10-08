@@ -34,3 +34,6 @@ $RECYCLE.BIN/
 ## Temporary and log files
 *.tmp
 *.log
+
+## Generated lifecycle diagnostic report
+/lifecycle_results.txt

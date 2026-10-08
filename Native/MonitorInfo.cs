@@ -7,7 +7,6 @@ public sealed class MonitorInfo
     public required uint MinBrightness { get; init; }
     public required uint CurrentBrightness { get; init; }
     public required uint MaxBrightness { get; init; }
-    public bool IsSoftware { get; init; } = false;
 
     public uint Min => MinBrightness;
     public uint Current => CurrentBrightness;

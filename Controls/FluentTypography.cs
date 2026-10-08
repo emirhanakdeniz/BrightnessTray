@@ -79,7 +79,6 @@ public static class FluentTypography
     // Standardized Windows 11 Fluent typography sizes from Theme tokens
     public static Font CreateBodyFont(FontStyle style = FontStyle.Regular) => CreateFont(BrightnessTray.UI.Theme.FontSizeBody, style); // ~14px
     public static Font CreateSecondaryFont(FontStyle style = FontStyle.Regular) => CreateFont(BrightnessTray.UI.Theme.FontSizeSecondary, style);   // ~12px
-    public static Font CreateBadgeFont(FontStyle style = FontStyle.Regular) => CreateFont(8f, style);       // ~10.5px
 
     public static Color GetPrimaryTextColor(bool isDark) => BrightnessTray.UI.Theme.TextPrimary(isDark);
     public static Color GetSecondaryTextColor(bool isDark) => BrightnessTray.UI.Theme.TextSecondary(isDark);

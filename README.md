@@ -76,7 +76,6 @@ BrightnessTray/
 ├── assets/
 │   └── brightnesstray-github-banner.png # GitHub README banner
 ├── Controls/
-│   ├── FluentBadge.cs          # Status badges (e.g. Software/Internal)
 │   ├── FluentLabel.cs          # DPI-aware GDI+ ClearType text labels
 │   ├── FluentMenuItem.cs       # Windows 11 Fluent context menu items
 │   ├── FluentSlider.cs         # Windows 11 Quick Settings style brightness slider
@@ -91,7 +90,7 @@ BrightnessTray/
 │   ├── DwmInterop.cs           # Windows 11 DWM Mica backdrop & window attributes
 │   ├── IBrightnessProvider.cs  # Brightness provider interface
 │   ├── IconRenderer.cs         # Dynamic taskbar tray icon generator
-│   ├── MemoryInterop.cs        # Process working set management
+│   ├── MemoryInterop.cs        # Console attachment for lifecycle diagnostics
 │   ├── MonitorInfo.cs          # Monitor metadata data structure
 │   ├── ShellInterop.cs         # Shell32 taskbar position detection
 │   ├── SystemMessageListenerWindow.cs # Top-level message sink for OS events

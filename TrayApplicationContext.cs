@@ -106,7 +106,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         // Restore saved brightness values and initialize tooltip status
-        _ = Task.Run(StartupInitializationAsync);
+        _ = StartupInitializationAsync();
 
 #if DEBUG
         Application.Idle += (s, e) =>
@@ -155,7 +155,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             _flyoutForm.OnDisplayConfigurationChanged();
         }
-        _ = Task.Run(StartupInitializationAsync);
+        _ = StartupInitializationAsync();
     }
 
     private void OnTaskbarCreated()
@@ -173,7 +173,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 #if DEBUG
         _loggedIdleMessage = false;
 #endif
-        _ = Task.Run(StartupInitializationAsync);
+        _ = StartupInitializationAsync();
     }
 
     private void RefreshTrayIcon(bool recreateTrayIcon)
@@ -488,11 +488,11 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void ToggleBrightnessMute()
     {
         if (_disposed || _isExiting) return;
-        _ = Task.Run(async () =>
+        _ = Task.Run(() =>
         {
             try
             {
-                var monitors = await Task.Run(() => _brightnessProvider.GetMonitors());
+                var monitors = _brightnessProvider.GetMonitors();
                 if (monitors.Count == 0) return;
 
                 // Check if any monitor currently has brightness > 0

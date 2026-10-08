@@ -20,7 +20,6 @@ public sealed class MonitorRowControl : Panel
     private readonly FluentLabel _nameLabel;
     private readonly FluentLabel _pencilButton;
     private readonly FluentLabel _chevronButton;
-    private readonly FluentBadge? _softwareBadge;
     private readonly FluentLabel _brightnessGlyph;
     private readonly FluentSlider _slider;
     private readonly FluentLabel _percentLabel;
@@ -94,7 +93,7 @@ public sealed class MonitorRowControl : Panel
         Padding = new Padding(Theme.Space8(DpiScale), Theme.Space4(DpiScale), Theme.Space8(DpiScale), Theme.Space4(DpiScale));
         TabStop = false;
 
-        // Top Row: [Monitor Icon U+E7F4] [Monitor Name (12px secondary)] [Pencil Glyph U+E70F] [Optional Software Badge]
+        // Top Row: [Monitor Icon U+E7F4] [Monitor Name (12px secondary)] [Pencil Glyph U+E70F]
         _topPanel = new Panel
         {
             Dock = DockStyle.Top,
@@ -128,17 +127,6 @@ public sealed class MonitorRowControl : Panel
         };
         _chevronButton.Click += (s, e) => ToggleExpanded();
         _topPanel.Controls.Add(_chevronButton);
-
-        if (_monitor.IsSoftware)
-        {
-            _softwareBadge = new FluentBadge("Software", gdiCache.BadgeFont)
-            {
-                Dock = DockStyle.Right,
-                Margin = Padding.Empty,
-                TabStop = false
-            };
-            _topPanel.Controls.Add(_softwareBadge);
-        }
 
         _pencilButton = new FluentLabel(gdiCache.GlyphSmallFont)
         {
@@ -600,7 +588,6 @@ public sealed class MonitorRowControl : Panel
         _brightnessGlyph.UpdateTheme(isDark, isMica, primaryColor);
         _percentLabel.UpdateTheme(isDark, isMica, primaryColor);
 
-        _softwareBadge?.UpdateTheme(isDark, isMica);
         _slider.UpdateTheme(isDark, isMica, accentColor);
 
         Invalidate();

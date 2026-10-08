@@ -1,7 +1,6 @@
 namespace BrightnessTray.Native;
 
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 public sealed class SystemMessageListenerWindow : NativeWindow, IDisposable
@@ -9,7 +8,6 @@ public sealed class SystemMessageListenerWindow : NativeWindow, IDisposable
     private const int WM_SETTINGCHANGE = 0x001A;
     private const int WM_DISPLAYCHANGE = 0x007E;
     private const int WM_POWERBROADCAST = 0x0218;
-    private const int WM_HOTKEY = 0x0312;
     private const int WM_DWMCOLORIZATIONCOLORCHANGED = 0x0320;
 
     private const int PBT_APMRESUMEAUTOMATIC = 0x0012;
@@ -29,7 +27,6 @@ public sealed class SystemMessageListenerWindow : NativeWindow, IDisposable
     public event Action? DisplayChanged;
     public event Action? TaskbarCreated;
     public event Action? ResumedFromSleep;
-    public event Action<int>? HotKeyPressed;
 
 #if DEBUG
     private static int s_wakeCount;
@@ -117,15 +114,6 @@ public sealed class SystemMessageListenerWindow : NativeWindow, IDisposable
                 break;
             }
 
-            case WM_HOTKEY:
-            {
-                int hotKeyId = m.WParam.ToInt32();
-#if DEBUG
-                LogWake($"WM_HOTKEY (ID: {hotKeyId})");
-#endif
-                HotKeyPressed?.Invoke(hotKeyId);
-                break;
-            }
         }
 
         base.WndProc(ref m);
