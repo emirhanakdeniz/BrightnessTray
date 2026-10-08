@@ -156,21 +156,25 @@ public static class DwmInterop
         {
             // 1. DWMWA_USE_IMMERSIVE_DARK_MODE (20): follow system app theme
             int darkMode = isDarkMode ? 1 : 0;
-            DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
+            if (DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int)) < 0)
+                return false;
 
             // 2. DWMWA_WINDOW_CORNER_PREFERENCE (33): rounded corners
             int cornerPref = (int)DWM_WINDOW_CORNER_PREFERENCE.DWMWCP_ROUND;
-            DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPref, sizeof(int));
+            if (DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPref, sizeof(int)) < 0)
+                return false;
 
             // 3. DWMWA_BORDER_COLOR (34): subtle theme-aware border
             int borderColor = isDarkMode
                 ? (0x3C << 16) | (0x3C << 8) | 0x3C   // #3C3C3C dark border
                 : (0xDB << 16) | (0xDB << 8) | 0xDB;  // #DBDBDB light border
-            DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_BORDER_COLOR, ref borderColor, sizeof(int));
+            if (DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_BORDER_COLOR, ref borderColor, sizeof(int)) < 0)
+                return false;
 
             // 4. DwmExtendFrameIntoClientArea with MARGINS(-1,-1,-1,-1) for whole client area
             var margins = new MARGINS(-1, -1, -1, -1);
-            DwmExtendFrameIntoClientArea(hWnd, ref margins);
+            if (DwmExtendFrameIntoClientArea(hWnd, ref margins) < 0)
+                return false;
 
             // 5. DWMWA_SYSTEMBACKDROP_TYPE (38)
             int backdropType = backdrop switch
@@ -181,14 +185,27 @@ public static class DwmInterop
                 BackdropKind.None => (int)DWM_SYSTEMBACKDROP_TYPE.DWMSBT_NONE,
                 _ => (int)DWM_SYSTEMBACKDROP_TYPE.DWMSBT_MAINWINDOW
             };
-            DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType, sizeof(int));
-
-            return true;
+            return DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType, sizeof(int)) >= 0;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[DwmInterop] Failed to apply DWM backdrop: {ex.Message}");
             return false;
+        }
+    }
+
+    public static void ClearBackdrop(IntPtr hWnd)
+    {
+        try
+        {
+            int backdropType = (int)DWM_SYSTEMBACKDROP_TYPE.DWMSBT_NONE;
+            DwmSetWindowAttribute(hWnd, (int)DWMWINDOWATTRIBUTE.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType, sizeof(int));
+            var margins = new MARGINS(0, 0, 0, 0);
+            DwmExtendFrameIntoClientArea(hWnd, ref margins);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[DwmInterop] Failed to clear DWM backdrop: {ex.Message}");
         }
     }
 

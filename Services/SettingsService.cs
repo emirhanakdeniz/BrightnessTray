@@ -211,9 +211,8 @@ public sealed class SettingsService : IDisposable
         StopAndDisposeSaveTimer();
         lock (_lock)
         {
-            if (_isDirty)
+            if (_isDirty && SaveInternal())
             {
-                SaveInternal();
                 _isDirty = false;
             }
         }
@@ -244,20 +243,32 @@ public sealed class SettingsService : IDisposable
         }
     }
 
-    private void SaveInternal()
+    private bool SaveInternal()
     {
+        string? tempFilePath = null;
         try
         {
             Directory.CreateDirectory(SettingsDirectory);
             string json = JsonSerializer.Serialize(_settings, AppSettingsJsonContext.Default.AppSettings);
-            string tempFilePath = Path.Combine(SettingsDirectory, $"settings.json.{Guid.NewGuid():N}.tmp");
+            tempFilePath = Path.Combine(SettingsDirectory, $"settings.json.{Guid.NewGuid():N}.tmp");
 
             File.WriteAllText(tempFilePath, json);
             File.Move(tempFilePath, SettingsFilePath, overwrite: true);
+            tempFilePath = null;
+            return true;
         }
         catch
         {
             // Silently handle I/O failures, never crash
+            return false;
+        }
+        finally
+        {
+            if (tempFilePath != null)
+            {
+                try { File.Delete(tempFilePath); }
+                catch { /* Best-effort cleanup after a failed save. */ }
+            }
         }
     }
 

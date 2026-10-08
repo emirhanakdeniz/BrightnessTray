@@ -12,6 +12,7 @@ public sealed class BrightnessService : IDisposable
     private readonly object _lifecycleLock = new();
     private readonly HashSet<Task> _pendingWrites = new();
     private Task? _shutdownTask;
+    private long _brightnessVersion;
     private bool _disposed;
 
     private const int DebounceMs = 120;
@@ -26,6 +27,8 @@ public sealed class BrightnessService : IDisposable
         public readonly SemaphoreSlim WriteGate = new(1, 1);
         public CancellationTokenSource? DebounceCts;
         public int LatestPercent;
+        public long Version;
+        public bool IsPending;
 
         public void Dispose()
         {
@@ -58,6 +61,9 @@ public sealed class BrightnessService : IDisposable
             if (_disposed) return;
 
             var state = _monitors.GetOrAdd(monitorId, _ => new MonitorDebounceState());
+            long version = ++_brightnessVersion;
+            state.Version = version;
+            state.IsPending = true;
             CancellationToken debounceToken;
             lock (state.Lock)
             {
@@ -76,6 +82,11 @@ public sealed class BrightnessService : IDisposable
                 lock (_lifecycleLock)
                 {
                     _pendingWrites.Remove(completed);
+                    if (state.Version == version)
+                    {
+                        state.IsPending = false;
+                        state.Version = ++_brightnessVersion;
+                    }
                 }
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
@@ -88,6 +99,28 @@ public sealed class BrightnessService : IDisposable
         catch
         {
             // Fail silently
+        }
+    }
+
+    internal long CaptureReadVersion()
+    {
+        lock (_lifecycleLock)
+        {
+            return _brightnessVersion;
+        }
+    }
+
+    internal int ResolveReadBrightness(string monitorId, int hardwarePercent, long readVersion)
+    {
+        lock (_lifecycleLock)
+        {
+            if (_monitors.TryGetValue(monitorId, out var state) &&
+                (state.IsPending || state.Version > readVersion))
+            {
+                return state.LatestPercent;
+            }
+
+            return hardwarePercent;
         }
     }
 

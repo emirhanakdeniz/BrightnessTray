@@ -16,6 +16,7 @@ public sealed class FlyoutForm : Form
     private readonly SettingsService _settingsService;
     private readonly Panel _contentContainer;
     private readonly FlyoutGdiCache _gdiCache;
+    private readonly SynchronizationContext _uiSyncContext;
     private NotifyIcon? _notifyIcon;
 
     private int _activeEditingCount;
@@ -71,6 +72,7 @@ public sealed class FlyoutForm : Form
     {
         _brightnessProvider = brightnessProvider;
         _brightnessService = brightnessService;
+        _uiSyncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settingsService = settingsService;
         _notifyIcon = notifyIcon;
         _gdiCache = new FlyoutGdiCache();
@@ -95,6 +97,7 @@ public sealed class FlyoutForm : Form
 
         // Initial default bounds
         UpdateFormBounds(0);
+        _brightnessService.BrightnessChanged += OnBrightnessRequested;
     }
 
     public void SetNotifyIcon(NotifyIcon notifyIcon)
@@ -194,6 +197,7 @@ public sealed class FlyoutForm : Form
 
     private void ApplySolidFallback(bool isDark)
     {
+        DwmInterop.ClearBackdrop(Handle);
         _isMicaActive = false;
         if (DwmInterop.IsHighContrast())
         {
@@ -534,7 +538,8 @@ public sealed class FlyoutForm : Form
         {
             for (int i = 0; i < monitors.Count; i++)
             {
-                existingRows[i].UpdateBrightness(monitors[i].CurrentPercent);
+                existingRows[i].UpdateBrightness(_brightnessService.ResolveReadBrightness(
+                    monitors[i].Id, monitors[i].CurrentPercent, 0));
             }
             return;
         }
@@ -542,7 +547,7 @@ public sealed class FlyoutForm : Form
         BuildMonitorRows(monitors);
     }
 
-    private void BuildMonitorRows(IReadOnlyList<MonitorInfo> monitors)
+    private void BuildMonitorRows(IReadOnlyList<MonitorInfo> monitors, long readVersion = 0)
     {
         _contentContainer.SuspendLayout();
         try
@@ -596,6 +601,8 @@ public sealed class FlyoutForm : Form
                 };
                 row.ExpandedChanged += RecalculateLayout;
                 row.UpdateTheme(isDark, _isMicaActive, accentColor);
+                row.UpdateBrightness(_brightnessService.ResolveReadBrightness(
+                    monitors[i].Id, monitors[i].CurrentPercent, readVersion));
                 table.Controls.Add(row, 0, i);
             }
 
@@ -651,6 +658,7 @@ public sealed class FlyoutForm : Form
         try
         {
             // Query monitors off the UI thread via IBrightnessProvider
+            long readVersion = _brightnessService.CaptureReadVersion();
             var monitors = await Task.Run(() => _brightnessProvider.GetMonitors());
 
             if (_disposed || IsDisposed)
@@ -676,13 +684,14 @@ public sealed class FlyoutForm : Form
                 // Update brightness values in existing controls silently without rebuilding
                 for (int i = 0; i < monitors.Count; i++)
                 {
-                    existingRows[i].UpdateBrightness(monitors[i].CurrentPercent);
+                    existingRows[i].UpdateBrightness(_brightnessService.ResolveReadBrightness(
+                        monitors[i].Id, monitors[i].CurrentPercent, readVersion));
                 }
                 return;
             }
 
             // Rebuild rows dynamically
-            BuildMonitorRows(monitors);
+            BuildMonitorRows(monitors, readVersion);
         }
         catch
         {
@@ -692,6 +701,25 @@ public sealed class FlyoutForm : Form
         {
             _isRefreshing = false;
         }
+    }
+
+    private void OnBrightnessRequested(string monitorId, int percent)
+    {
+        _uiSyncContext.Post(_ =>
+        {
+            if (_disposed || IsDisposed) return;
+            if (_contentContainer.Controls.Count == 0 ||
+                _contentContainer.Controls[0] is not TableLayoutPanel table) return;
+            for (int i = 0; i < table.Controls.Count; i++)
+            {
+                if (table.Controls[i] is MonitorRowControl row &&
+                    string.Equals(row.MonitorId, monitorId, StringComparison.OrdinalIgnoreCase))
+                {
+                    row.UpdateBrightness(_brightnessService.ResolveReadBrightness(monitorId, percent, 0));
+                    break;
+                }
+            }
+        }, null);
     }
 
     private void ShowEmptyState()
@@ -941,6 +969,7 @@ public sealed class FlyoutForm : Form
         {
             if (disposing)
             {
+                _brightnessService.BrightnessChanged -= OnBrightnessRequested;
                 StopAndDisposeAnimTimer();
 
                 ClearContent();
