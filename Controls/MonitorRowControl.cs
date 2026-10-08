@@ -26,7 +26,7 @@ public sealed class MonitorRowControl : Panel
 
     private readonly Panel _topPanel;
     private readonly TableLayoutPanel _bottomTable;
-    private readonly ContextMenuStrip _nameContextMenu;
+    private readonly FluentContextMenu _nameContextMenu;
     private readonly ToolStripMenuItem _renameMenuItem;
     private readonly ToolStripMenuItem _resetMenuItem;
 
@@ -171,7 +171,7 @@ public sealed class MonitorRowControl : Panel
         };
 
         // Context Menu on name and top panel: "Rename" and "Reset name"
-        _nameContextMenu = new ContextMenuStrip();
+        _nameContextMenu = new FluentContextMenu();
         _renameMenuItem = new ToolStripMenuItem("Rename", null, (s, e) => BeginInlineEdit());
         _resetMenuItem = new ToolStripMenuItem("Reset name", null, (s, e) => ResetAlias());
         _nameContextMenu.Items.Add(_renameMenuItem);
@@ -589,6 +589,15 @@ public sealed class MonitorRowControl : Panel
         _percentLabel.UpdateTheme(isDark, isMica, primaryColor);
 
         _slider.UpdateTheme(isDark, isMica, accentColor);
+        _nameContextMenu.UpdateTheme(isDark, accentColor);
+        if (_inlineContainer != null && _inlineTextBox != null)
+        {
+            Color fieldBackground = Theme.FieldBackground(isDark);
+            _inlineContainer.BackColor = fieldBackground;
+            _inlineTextBox.BackColor = fieldBackground;
+            _inlineTextBox.ForeColor = primaryColor;
+            _inlineContainer.Invalidate();
+        }
 
         Invalidate();
     }

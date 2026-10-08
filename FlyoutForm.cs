@@ -18,6 +18,9 @@ public sealed class FlyoutForm : Form
     private readonly FlyoutGdiCache _gdiCache;
     private readonly SynchronizationContext _uiSyncContext;
     private NotifyIcon? _notifyIcon;
+    private FluentLabel? _emptyStateGlyph;
+    private FluentLabel? _emptyStateTitle;
+    private FluentLabel? _emptyStateMessage;
 
     private int _activeEditingCount;
     public bool IsInlineEditingActive => _activeEditingCount > 0;
@@ -26,6 +29,7 @@ public sealed class FlyoutForm : Form
 
     private BackdropKind _currentBackdrop = BackdropKind.Mica;
     private bool _isMicaActive;
+    private bool _isDarkMode;
     private long _lastClosedTimestamp;
     private bool _isRefreshing;
     private bool _disposed;
@@ -46,7 +50,7 @@ public sealed class FlyoutForm : Form
     public int Scale(int pixels) => BrightnessTray.UI.Theme.Scale(pixels, DpiScale);
 
     public bool IsShowingOrVisible => Visible || _isAnimating;
-    public bool IsDarkMode => true;
+    public bool IsDarkMode => _isDarkMode;
 
     public BackdropKind CurrentBackdrop
     {
@@ -74,6 +78,7 @@ public sealed class FlyoutForm : Form
         _brightnessService = brightnessService;
         _uiSyncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settingsService = settingsService;
+        _isDarkMode = !DwmInterop.IsAppsUseLightTheme();
         _notifyIcon = notifyIcon;
         _gdiCache = new FlyoutGdiCache();
 
@@ -158,6 +163,7 @@ public sealed class FlyoutForm : Form
             return;
         }
 
+        _isDarkMode = !DwmInterop.IsAppsUseLightTheme();
         bool isDark = IsDarkMode;
 
         if (DwmInterop.IsMicaSupported() && CurrentBackdrop != BackdropKind.None)
@@ -192,6 +198,9 @@ public sealed class FlyoutForm : Form
             }
         }
 
+        _emptyStateGlyph?.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
+        _emptyStateTitle?.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextPrimary(isDark));
+        _emptyStateMessage?.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
         Invalidate();
     }
 
@@ -767,6 +776,9 @@ public sealed class FlyoutForm : Form
                 TabStop = false
             };
             message.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
+            _emptyStateGlyph = glyph;
+            _emptyStateTitle = title;
+            _emptyStateMessage = message;
 
             emptyPanel.Controls.Add(message);
             emptyPanel.Controls.Add(title);
@@ -784,6 +796,9 @@ public sealed class FlyoutForm : Form
 
     private void ClearContent()
     {
+        _emptyStateGlyph = null;
+        _emptyStateTitle = null;
+        _emptyStateMessage = null;
         foreach (Control control in _contentContainer.Controls)
         {
             control.Dispose();

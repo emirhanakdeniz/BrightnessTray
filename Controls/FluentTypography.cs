@@ -104,7 +104,8 @@ public static class FluentTypography
     }
 
     internal static void DrawText(Graphics g, string text, Font font, Rectangle bounds,
-        SolidBrush brush, StringFormat sf, ContentAlignment align, bool autoEllipsis)
+        SolidBrush brush, StringFormat sf, ContentAlignment align, bool autoEllipsis,
+        System.Drawing.Text.TextRenderingHint renderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit)
     {
         if (string.IsNullOrEmpty(text) || bounds.Width <= 0 || bounds.Height <= 0) return;
         sf.FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces;
@@ -148,7 +149,7 @@ public static class FluentTypography
                 break;
         }
 
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        g.TextRenderingHint = renderingHint;
         var rectF = new RectangleF(bounds.X, bounds.Y, bounds.Width, bounds.Height);
         g.DrawString(text, font, brush, rectF, sf);
     }

@@ -53,10 +53,11 @@ internal sealed class DrawingResources : IDisposable
     }
 
     public void DrawText(Graphics graphics, string text, Font font, Rectangle bounds,
-        Color color, ContentAlignment align = ContentAlignment.MiddleLeft, bool autoEllipsis = false)
+        Color color, ContentAlignment align = ContentAlignment.MiddleLeft, bool autoEllipsis = false,
+        System.Drawing.Text.TextRenderingHint renderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit)
     {
         _textFormat ??= new StringFormat(StringFormat.GenericTypographic);
-        FluentTypography.DrawText(graphics, text, font, bounds, Brush(color), _textFormat, align, autoEllipsis);
+        FluentTypography.DrawText(graphics, text, font, bounds, Brush(color), _textFormat, align, autoEllipsis, renderingHint);
     }
 
     // The path is borrowed until the next call; callers must not dispose it.

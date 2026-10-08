@@ -84,6 +84,10 @@ public sealed class FluentLabel : Control
         }
 
         _drawingResources.EnsureDpi(DeviceDpi);
+        // ClearType assumes an opaque background; Mica needs grayscale coverage in the alpha channel.
+        var renderingHint = _isMicaActive
+            ? System.Drawing.Text.TextRenderingHint.AntiAliasGridFit
+            : System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
         _drawingResources.DrawText(
             e.Graphics,
             Text,
@@ -91,7 +95,8 @@ public sealed class FluentLabel : Control
             ClientRectangle,
             ForeColor,
             TextAlign,
-            AutoEllipsis);
+            AutoEllipsis,
+            renderingHint);
     }
 
     protected override void OnForeColorChanged(EventArgs e)

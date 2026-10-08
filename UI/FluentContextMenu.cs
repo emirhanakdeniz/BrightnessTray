@@ -15,7 +15,7 @@ public sealed class FluentContextMenu : ContextMenuStrip
     public Color AccentColor => _accentColor;
 
     public FluentContextMenu()
-        : this(isDarkMode: true, DwmInterop.GetAccentColor())
+        : this(isDarkMode: !DwmInterop.IsAppsUseLightTheme(), DwmInterop.GetAccentColor())
     {
     }
 

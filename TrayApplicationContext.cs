@@ -53,7 +53,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _brightnessService = new BrightnessService(_brightnessProvider, _settingsService);
 
-        _contextMenu = new FluentContextMenu(isDarkMode: true);
+        _contextMenu = new FluentContextMenu();
 
         var startWithWindowsItem = new FluentToggleMenuItem(
             "Start with Windows",
@@ -124,7 +124,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (e.Category == UserPreferenceCategory.General || e.Category == UserPreferenceCategory.Color || e.Category == UserPreferenceCategory.VisualStyle)
         {
-            OnThemeOrColorChanged();
+            _uiSyncContext.Post(_ => OnThemeOrColorChanged(), null);
         }
     }
 
@@ -136,7 +136,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 #endif
         RefreshTrayIcon(recreateTrayIcon: false);
         Color accent = DwmInterop.GetAccentColor();
-        _contextMenu.UpdateTheme(isDark: true, accent);
+        _contextMenu.UpdateTheme(isDark: !DwmInterop.IsAppsUseLightTheme(), accent);
 
         if (_flyoutForm != null && !_flyoutForm.IsDisposed)
         {
