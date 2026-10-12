@@ -11,6 +11,11 @@ public static class Theme
 
     // --- Window Positioning Tokens ---
     public const int FlyoutEdgeGap = 12;
+    public const int FlyoutWidth = 276;
+    public const int FlyoutVerticalPadding = 3;
+    public const int MonitorRowHeight = 62;
+    public const int CollapsedMonitorRowHeight = 40;
+    public const int MonitorRowHorizontalPadding = 16;
 
     // --- Radii ---
     public const int BaseRadius4 = 4;
@@ -43,7 +48,7 @@ public static class Theme
         isDark ? Color.FromArgb(85, 85, 85) : Color.FromArgb(176, 176, 176);
 
     public static Color BackgroundBase(bool isDark) =>
-        isDark ? Color.FromArgb(32, 32, 33) : Color.FromArgb(243, 243, 243);
+        isDark ? Color.FromArgb(32, 32, 32) : Color.FromArgb(243, 246, 250);
 
     public static Color FieldBackground(bool isDark) =>
         isDark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(229, 229, 229);
@@ -56,7 +61,24 @@ public static class Theme
             : Color.FromArgb(pressed ? 22 : 14, 0, 0, 0);
 
     public static Color TrackUnfilled(bool isDark) =>
-        isDark ? Color.FromArgb(77, 77, 77) : Color.FromArgb(220, 222, 224);
+        isDark ? Color.FromArgb(77, 77, 77) : Color.FromArgb(190, 201, 215);
+
+    public static Color FlyoutText(bool isDark) =>
+        IsHighContrast ? SystemColors.WindowText
+            : isDark ? Color.FromArgb(242, 245, 250) : Color.FromArgb(26, 26, 26);
+
+    public static Color FlyoutIcon(bool isDark) =>
+        IsHighContrast ? SystemColors.WindowText
+            : isDark ? Color.FromArgb(190, 190, 190) : Color.FromArgb(78, 94, 114);
+
+    public static Color FlyoutDivider(bool isDark) =>
+        IsHighContrast ? SystemColors.WindowText
+            : isDark ? Color.FromArgb(49, 49, 49) : Color.FromArgb(215, 224, 234);
+
+    public static Color SliderThumb(bool isDark) =>
+        IsHighContrast ? SystemColors.Window : isDark ? Color.FromArgb(245, 248, 252) : Color.White;
+
+    private static bool IsHighContrast => System.Windows.Forms.SystemInformation.HighContrast;
 
     public static Color BorderSubtle(bool isDark) =>
         isDark ? Color.FromArgb(60, 60, 60) : Color.FromArgb(219, 219, 219);

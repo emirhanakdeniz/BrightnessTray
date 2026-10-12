@@ -9,5 +9,9 @@
   <ItemGroup>
     <Compile Include="../Services/SettingsService.cs" Link="SettingsService.cs" />
     <Compile Include="../Native/MonitorInfo.cs" Link="MonitorInfo.cs" />
+    <Compile Include="../Controls/MonitorExpandButton.cs" Link="MonitorExpandButton.cs" />
+    <Compile Include="../Controls/FluentTypography.cs" Link="FluentTypography.cs" />
+    <Compile Include="../UI/DrawingResources.cs" Link="DrawingResources.cs" />
+    <Compile Include="../UI/Theme.cs" Link="Theme.cs" />
   </ItemGroup>
 </Project>

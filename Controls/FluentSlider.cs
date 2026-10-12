@@ -125,21 +125,23 @@ public sealed class FluentSlider : Control
             DisposeCachedGdiResources();
             _lastScaleDpi = curDpi;
 
-            Color unfilledColor = Theme.TrackUnfilled(_isDarkMode);
+            Color unfilledColor = DwmInterop.IsHighContrast() ? SystemColors.WindowText : Theme.TrackUnfilled(_isDarkMode);
             _unfilledPen = new Pen(unfilledColor, trackHeight)
             {
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round
             };
 
-            _filledPen = new Pen(Enabled ? _accentColor : Theme.TextDisabled(_isDarkMode), trackHeight)
+            Color accentColor = DwmInterop.IsHighContrast() ? SystemColors.Highlight : _accentColor;
+            _filledPen = new Pen(Enabled ? accentColor : Theme.TextDisabled(_isDarkMode), trackHeight)
             {
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round
             };
         }
 
-        Color dotColor = Enabled ? _accentColor : Theme.TextDisabled(_isDarkMode);
+        Color dotColor = DwmInterop.IsHighContrast() ? SystemColors.Highlight
+            : Enabled ? _accentColor : Theme.TextDisabled(_isDarkMode);
         if (_thumbBrush == null || _thumbBrush.Color != dotColor)
         {
             _thumbBrush?.Dispose();
@@ -197,13 +199,16 @@ public sealed class FluentSlider : Control
             g.DrawLine(_filledPen, trackLeft, centerY, Math.Min(thumbX, trackRight), centerY);
         }
 
-        // A single flat accent thumb keeps the control visually quiet.
+        // A pale outer ring keeps the accent center visible against the thin track.
         float outerX = thumbX - thumbRadius;
         float outerY = centerY - thumbRadius;
         var outerRect = new RectangleF(outerX, outerY, thumbSize, thumbSize);
+        g.FillEllipse(_drawingResources.Brush(Theme.SliderThumb(_isDarkMode)), outerRect);
         if (_thumbBrush != null)
         {
-            g.FillEllipse(_thumbBrush, outerRect);
+            float ring = 3f * scale;
+            g.FillEllipse(_thumbBrush, outerRect.X + ring, outerRect.Y + ring,
+                outerRect.Width - 2 * ring, outerRect.Height - 2 * ring);
         }
 
         // 4. Keyboard focus visual (only shown when focused via keyboard)

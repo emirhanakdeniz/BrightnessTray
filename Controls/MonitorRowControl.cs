@@ -18,6 +18,10 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
     private readonly FluentLabel _nameLabel;
     private readonly FluentSlider _slider;
     private readonly FluentLabel _percentLabel;
+    private readonly MonitorRowGlyph _monitorGlyph;
+    private readonly MonitorRowGlyph _brightnessGlyph;
+    private readonly MonitorExpandButton _expandButton;
+    private readonly ToolTip _nameToolTip = new();
 
     private readonly Panel _topPanel;
     private readonly Panel _sliderPanel;
@@ -46,7 +50,7 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
     public string DisplayName => _currentDisplayName;
     public bool IsEditing => _isEditing;
     public bool IsExpanded => _isExpanded;
-    internal int PreferredRowHeight => Scale(_isExpanded ? 68 : 36);
+    internal int PreferredRowHeight => Scale(_isExpanded ? Theme.MonitorRowHeight : Theme.CollapsedMonitorRowHeight);
     public bool ShowBottomDivider
     {
         get => _showBottomDivider;
@@ -78,7 +82,7 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
         _displayIndex = displayIndex;
         _brightnessService = brightnessService;
         _settingsService = settingsService;
-        _editorFont = gdiCache.BodyFont;
+        _editorFont = gdiCache.SecondaryFont;
         _onEditingStateChanged = onEditingStateChanged;
         _onRenamed = onRenamed;
 
@@ -87,27 +91,29 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
         DoubleBuffered = true;
         BackColor = Color.Transparent;
         Margin = Padding.Empty;
-        Padding = new Padding(0, Theme.Space4(DpiScale), 0, Theme.Space4(DpiScale));
+        Padding = new Padding(Scale(Theme.MonitorRowHorizontalPadding), Scale(8),
+            Scale(Theme.MonitorRowHorizontalPadding), Scale(10));
         TabStop = false;
 
         // Keep the clickable monitor name visible when collapsed.
         _topPanel = new Panel
         {
             Dock = DockStyle.Top,
-            Height = Scale(28),
+            Height = Scale(22),
             BackColor = Color.Transparent,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
             TabStop = false
         };
 
-        _nameLabel = new FluentLabel(gdiCache.BodyFont)
+        _nameLabel = new FluentLabel(gdiCache.SecondaryFont)
         {
             Text = _currentDisplayName,
             AutoEllipsis = true,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = Padding.Empty,
+            Padding = new Padding(Scale(4), 0, 0, 0),
             TabStop = false,
             Cursor = Cursors.Hand,
             AccessibleName = _currentDisplayName,
@@ -145,13 +151,28 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
         _nameLabel.ContextMenuStrip = _nameContextMenu;
         _topPanel.ContextMenuStrip = _nameContextMenu;
 
+        _monitorGlyph = new MonitorRowGlyph(MonitorRowGlyphKind.Monitor)
+        {
+            Dock = DockStyle.Left,
+            Width = Scale(20)
+        };
+        _expandButton = new MonitorExpandButton
+        {
+            Dock = DockStyle.Right,
+            Width = Scale(24),
+            TabIndex = 0
+        };
+        _expandButton.Click += (s, e) => ToggleExpanded();
         _topPanel.Controls.Add(_nameLabel);
+        _topPanel.Controls.Add(_monitorGlyph);
+        _topPanel.Controls.Add(_expandButton);
+        _nameToolTip.SetToolTip(_nameLabel, _currentDisplayName);
 
-        // A full-width slider keeps the display name and value on one clear line above it.
+        // Keep the glyph, slider and percentage aligned on a separate compact line.
         _sliderPanel = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = Scale(32),
+            Height = Scale(22),
             BackColor = Color.Transparent,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
@@ -163,27 +184,32 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
             Minimum = 0,
             Maximum = 100,
             Dock = DockStyle.Fill,
-            Height = Scale(32),
+            Height = Scale(22),
             Margin = Padding.Empty,
             TabStop = true,
-            TabIndex = 0,
+            TabIndex = 1,
             AccessibleName = $"Brightness for {_currentDisplayName}"
         };
 
-        _percentLabel = new FluentLabel(gdiCache.BodyFont)
+        _percentLabel = new FluentLabel(gdiCache.SecondaryFont)
         {
             Text = $"{_monitor.CurrentPercent}%",
             Dock = DockStyle.Right,
-            Width = Scale(52),
-            Padding = new Padding(0, 0, Scale(8), 0),
+            Width = Scale(36),
+            Padding = Padding.Empty,
             TextAlign = ContentAlignment.MiddleRight,
             Margin = Padding.Empty,
             TabStop = false
         };
 
-        _topPanel.Controls.Add(_percentLabel);
-        _topPanel.Controls.SetChildIndex(_percentLabel, 1);
+        _brightnessGlyph = new MonitorRowGlyph(MonitorRowGlyphKind.Brightness)
+        {
+            Dock = DockStyle.Left,
+            Width = Scale(20)
+        };
         _sliderPanel.Controls.Add(_slider);
+        _sliderPanel.Controls.Add(_brightnessGlyph);
+        _sliderPanel.Controls.Add(_percentLabel);
 
         _isUpdatingUI = true;
         try
@@ -199,6 +225,9 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
 
         Controls.Add(_sliderPanel);
         Controls.Add(_topPanel);
+        _topPanel.TabIndex = 0;
+        _sliderPanel.TabIndex = 1;
+        UpdateAccessibleNames();
 
         Height = PreferredRowHeight;
 
@@ -263,8 +292,10 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
 
         _isExpanded = !_isExpanded;
         _sliderPanel.Visible = _isExpanded;
+        _expandButton.IsExpanded = _isExpanded;
         _expandMenuItem.Text = _isExpanded ? "Collapse" : "Expand";
         ((FluentMenuItem)_expandMenuItem).Glyph = _isExpanded ? "\uE70E" : "\uE70D";
+        UpdateAccessibleNames();
         Height = PreferredRowHeight;
         ExpandedChanged?.Invoke();
         Invalidate();
@@ -456,6 +487,9 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
     {
         _nameLabel.AccessibleDescription = $"{_currentDisplayName}. Click to rename, or press F2.";
         _slider.AccessibleName = $"Brightness for {_currentDisplayName}";
+        _expandButton.AccessibleName = $"{(_isExpanded ? "Collapse" : "Expand")} {_currentDisplayName}";
+        _expandButton.AccessibleDescription = _isExpanded ? "Hide brightness slider" : "Show brightness slider";
+        _nameToolTip.SetToolTip(_nameLabel, _currentDisplayName);
     }
 
     protected override void OnDpiChangedAfterParent(EventArgs e)
@@ -467,13 +501,16 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
     private void ApplyDpiMetrics()
     {
         _drawingResources.Clear();
-        float scale = DpiScale;
-        Padding = new Padding(0, Theme.Space4(scale), 0, Theme.Space4(scale));
-        _topPanel.Height = Scale(28);
-        _percentLabel.Width = Scale(52);
-        _percentLabel.Padding = new Padding(0, 0, Scale(8), 0);
-        _sliderPanel.Height = Scale(32);
-        _slider.Height = Scale(32);
+        Padding = new Padding(Scale(Theme.MonitorRowHorizontalPadding), Scale(8),
+            Scale(Theme.MonitorRowHorizontalPadding), Scale(10));
+        _topPanel.Height = Scale(22);
+        _nameLabel.Padding = new Padding(Scale(4), 0, 0, 0);
+        _monitorGlyph.Width = Scale(20);
+        _brightnessGlyph.Width = Scale(20);
+        _expandButton.Width = Scale(24);
+        _percentLabel.Width = Scale(36);
+        _sliderPanel.Height = Scale(22);
+        _slider.Height = Scale(22);
         Height = PreferredRowHeight;
     }
 
@@ -492,8 +529,8 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
 
         if (_showBottomDivider)
         {
-            var divPen = _drawingResources.Pen(Theme.BorderSubtle(_isDarkMode), 1f);
-            e.Graphics.DrawLine(divPen, Theme.Space8(DpiScale), Height - 1, Width - Theme.Space8(DpiScale), Height - 1);
+            var divPen = _drawingResources.Pen(Theme.FlyoutDivider(_isDarkMode), Math.Max(1, Scale(1)));
+            e.Graphics.DrawLine(divPen, 0, Height - 1, Width, Height - 1);
         }
     }
 
@@ -504,11 +541,15 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
         _isMicaActive = isMica;
         _accentColor = accentColor;
 
-        Color primaryColor = Theme.TextPrimary(isDark);
-        Color secondaryColor = Theme.TextSecondary(isDark);
+        Color primaryColor = Theme.FlyoutText(isDark);
+        Color iconColor = Theme.FlyoutIcon(isDark);
 
         _nameLabel.UpdateTheme(isMica, primaryColor);
-        _percentLabel.UpdateTheme(isMica, secondaryColor);
+        _percentLabel.UpdateTheme(isMica, primaryColor);
+        _monitorGlyph.ForeColor = iconColor;
+        _brightnessGlyph.ForeColor = iconColor;
+        _expandButton.BackColor = DwmInterop.IsHighContrast() ? SystemColors.Window : Theme.BackgroundBase(isDark);
+        _expandButton.ForeColor = iconColor;
 
         _slider.UpdateTheme(isDark, accentColor);
         _nameContextMenu.UpdateTheme(isDark, accentColor);
@@ -561,6 +602,7 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
             _drawingResources.Dispose();
 
             _nameContextMenu.Dispose();
+            _nameToolTip.Dispose();
             CleanupInlineEditor();
         }
 

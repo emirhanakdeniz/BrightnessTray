@@ -53,7 +53,8 @@ var cases = new (string Name, Action Run)[]
             };
             Equal(expected, monitor.CurrentPercent);
         }
-    })
+    }),
+    ("Chevron repaints recycled pixels in both themes", ChevronPaintingRegression.Run)
 };
 
 int failures = 0;

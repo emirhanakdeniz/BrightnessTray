@@ -14,10 +14,10 @@ Designed exclusively for Windows 11 with a solid theme-aware flyout, system acce
 - **Internal Panel Support**: Automatic WMI fallback for laptops and built-in displays.
 - **Windows 11 Native UI**:
   - Light/dark flyout and menus follow the Windows app theme; the tray icon follows the Windows system theme.
-  - A solid flyout background with native rounded window corners.
-  - A fixed Brightness header, readable two-line monitor rows, and a scrollable list when the flyout reaches the screen's working-area height.
+  - A compact, headerless flyout with a solid anthracite dark surface, a pale light surface, and native rounded window corners.
+  - Two-line monitor rows: display icon, name, and collapse/expand chevron above a brightness icon, slider, and percentage. Subtle dividers separate displays; long lists scroll within the screen's working-area height.
   - Start with Windows and Exit are available by right-clicking the tray icon.
-  - Slim brightness sliders with system accent color fill and flat circular thumbs.
+  - Slim brightness sliders with system accent color fill and pale ringed thumbs.
   - Segoe Fluent Icons typography and smooth micro-interactions.
 - **Idle Behavior**: No periodic polling. After pending writes, saves, and OS-event debounces finish, the application waits in its message loop.
 - **Lazy Lifecycle**: The flyout is created on demand and disposed on the UI queue after closing. Fonts and drawing caches are released without forced garbage collection or working-set trimming.
@@ -48,6 +48,7 @@ Designed exclusively for Windows 11 with a solid theme-aware flyout, system acce
 - **Middle-Click Tray Icon**: Quickly toggle brightness between mute (0%) and your previous level.
 - **Right-Click Monitor Name**: Rename, reset a custom name, or collapse/expand that monitor's slider.
 - **Click Name / F2 within a Monitor Row**: Edit the display name inline (press Enter to save, Esc to cancel).
+- **Click Monitor Chevron**: Collapse or expand that monitor's slider. The chevron is also reachable with Tab and activates with Space or Enter. Hover over a truncated monitor name to see the full name.
 - **Long Monitor Lists**: Use the vertical scrollbar to reach additional monitors; wheel input over a row continues to adjust its brightness.
 - **Right-Click Tray Icon**:
   - **Start with Windows**: Enable or disable automatic launch on Windows startup.
@@ -89,7 +90,7 @@ Startup, display changes, and resume refresh the monitor list and restore saved 
 
 ## Diagnostics and Manual Verification
 
-Run the package-free regression checks for settings loading and brightness normalization:
+Run the package-free regression checks for settings loading, brightness normalization, and chevron repainting:
 
 ```pwsh
 dotnet run --project Tests/BrightnessTray.RegressionTests.csproj -c Release
@@ -107,7 +108,7 @@ This opens/closes the flyout and records working-set/private-memory snapshots an
 
 - Drag a slider immediately after opening; confirm it does not jump back when a refresh completes. Check wheel input and middle-click mute/restore.
 - Rename a monitor, exit, and restart; verify persistence. Disconnect a monitor during adjustment and check clean shutdown.
-- Check monitor name context menus, collapse/expand, long-name truncation, and keyboard access with Tab. With enough monitors to fill the screen, verify the header stays fixed and the last monitor is reachable using the scrollbar.
+- Check monitor name context menus, chevron collapse/expand, long-name truncation and tooltips, and keyboard access with Tab. With enough monitors to fill the screen, verify the last monitor is reachable using the scrollbar.
 - Grab the slider thumb at its edge and drag to both endpoints; confirm no initial jump. Test track-click-and-drag, fast wheel input, and partial wheel deltas on a precision mouse. Check the tray startup toggle and Escape versus outside-click dismissal.
 - Under **Settings → Personalization → Colors**, choose **Custom** and vary Windows mode and app mode independently. Check the tray icon against Windows mode and the flyout/menus against app mode; change the accent color and transparency effects too.
 - Under **Settings → System → Display → Scale**, check 125%, 150%, and 200%, including mixed-DPI monitors. Repeatedly open/close the flyout and verify settled idle CPU after pending work finishes.
@@ -126,6 +127,8 @@ BrightnessTray/
 │   ├── FluentSlider.cs         # Windows 11 Quick Settings style brightness slider
 │   ├── FluentToggleMenuItem.cs # Win11 toggle-switch menu items
 │   ├── FluentTypography.cs     # Segoe UI Variable & Segoe Fluent Icons helper
+│   ├── MonitorExpandButton.cs  # Keyboard-accessible collapse/expand chevron
+│   ├── MonitorRowGlyph.cs      # DPI-aware display and brightness icon drawing
 │   └── MonitorRowControl.cs    # Monitor row with slider, options, and rename box
 ├── Native/
 │   ├── AnimationInterop.cs     # Windows animation preference query
