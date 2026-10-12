@@ -11,7 +11,7 @@ using BrightnessTray.UI;
 public sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly NotifyIcon _notifyIcon;
-    private readonly FluentContextMenu _contextMenu;
+    private FluentContextMenu? _contextMenu;
     private readonly IBrightnessProvider _brightnessProvider;
     private readonly SettingsService _settingsService;
     private readonly BrightnessService _brightnessService;
@@ -42,40 +42,17 @@ public sealed class TrayApplicationContext : ApplicationContext
 #endif
 
     public TrayApplicationContext()
+        : this(CreateBrightnessProvider(), new SettingsService())
+    {
+    }
+
+    internal TrayApplicationContext(IBrightnessProvider brightnessProvider, SettingsService settingsService)
     {
         _uiSyncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
-        _settingsService = new SettingsService(_uiSyncContext);
-
-        // Detect internal laptop displays via Win32 CCD API to avoid loading WMI/System.Management on desktop PCs
-        var ddcCiProvider = new DdcCiProvider();
-        _brightnessProvider = DisplayConfigInterop.HasInternalDisplay()
-            ? new CompositeBrightnessProvider(new WmiProvider(), ddcCiProvider)
-            : ddcCiProvider;
+        _settingsService = settingsService;
+        _brightnessProvider = brightnessProvider;
 
         _brightnessService = new BrightnessService(_brightnessProvider, _settingsService);
-
-        _contextMenu = new FluentContextMenu();
-
-        var startWithWindowsItem = new FluentToggleMenuItem(
-            "Start with Windows",
-            "\uE7F4",
-            AutoStartManager.IsAutoStartEnabled());
-        startWithWindowsItem.ToggleChanged += OnStartWithWindowsToggled;
-
-        var separatorItem = new ToolStripSeparator();
-        var exitItem = new FluentMenuItem("Exit", "\uE7E8", OnExitClicked);
-
-        _contextMenu.Opening += (s, e) =>
-        {
-            startWithWindowsItem.Checked = AutoStartManager.IsAutoStartEnabled();
-        };
-
-        _contextMenu.Items.AddRange(new ToolStripItem[]
-        {
-            startWithWindowsItem,
-            separatorItem,
-            exitItem
-        });
 
         int dpi = IconRenderer.GetTaskbarDpi();
         bool isLight = IconRenderer.IsSystemTaskbarLight();
@@ -86,12 +63,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             Text = "BrightnessTray",
             Icon = IconRenderer.CreateBrightnessIcon(isLight, dpi),
-            ContextMenuStrip = _contextMenu,
             Visible = true
         };
         _lastTooltipText = "BrightnessTray";
 
         _notifyIcon.MouseClick += OnNotifyIconMouseClick;
+        _notifyIcon.MouseDown += OnNotifyIconMouseDown;
+        _notifyIcon.MouseUp += OnNotifyIconMouseUp;
 
         // Top-level hidden native window listening for OS broadcasts (theme, display change, taskbar recreate, resume from sleep)
         _systemListenerWindow = new SystemMessageListenerWindow();
@@ -112,6 +90,15 @@ public sealed class TrayApplicationContext : ApplicationContext
 #if DEBUG
         Application.Idle += OnApplicationIdle;
 #endif
+    }
+
+    private static IBrightnessProvider CreateBrightnessProvider()
+    {
+        // Avoid loading WMI/System.Management on desktop PCs.
+        var ddcCiProvider = new DdcCiProvider();
+        return DisplayConfigInterop.HasInternalDisplay()
+            ? new CompositeBrightnessProvider(new WmiProvider(), ddcCiProvider)
+            : ddcCiProvider;
     }
 
 #if DEBUG
@@ -138,8 +125,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _loggedIdleMessage = false;
 #endif
         RefreshTrayIcon(recreateTrayIcon: false);
-        Color accent = DwmInterop.GetAccentColor();
-        _contextMenu.UpdateTheme(isDark: !DwmInterop.IsAppsUseLightTheme(), accent);
+        _contextMenu?.UpdateTheme(isDark: !DwmInterop.IsAppsUseLightTheme(), DwmInterop.GetAccentColor());
 
         if (_flyoutForm != null && !_flyoutForm.IsDisposed)
         {
@@ -393,6 +379,54 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private void OnNotifyIconMouseDown(object? sender, MouseEventArgs e)
+    {
+        // NotifyIcon displays its menu before raising MouseUp. Attach it on
+        // right-button down so WinForms retains native tray focus/dismissal.
+        if (e.Button == MouseButtons.Right) EnsureContextMenuCreated();
+    }
+
+    private void OnNotifyIconMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Right && _contextMenu is { Visible: false })
+            DisposeContextMenu();
+    }
+
+    private void EnsureContextMenuCreated()
+    {
+        if (_disposed || _isExiting || _contextMenu != null) return;
+
+        var menu = new FluentContextMenu();
+        var startupItem = new FluentToggleMenuItem(
+            "Start with Windows", "\uE7F4", AutoStartManager.IsAutoStartEnabled());
+        startupItem.ToggleChanged += OnStartWithWindowsToggled;
+        menu.Opening += (_, _) => startupItem.Checked = AutoStartManager.IsAutoStartEnabled();
+        menu.Items.AddRange([
+            startupItem,
+            new ToolStripSeparator(),
+            new FluentMenuItem("Exit", "\uE7E8", OnExitClicked)
+        ]);
+        menu.UpdateTheme(!DwmInterop.IsAppsUseLightTheme(), DwmInterop.GetAccentColor());
+        menu.Closed += (_, _) =>
+        {
+            // Let item clicks (including Exit) finish before disposing items.
+            _uiSyncContext.Post(_ =>
+            {
+                if (ReferenceEquals(_contextMenu, menu) && !menu.Visible)
+                    DisposeContextMenu();
+            }, null);
+        };
+        _contextMenu = menu;
+        _notifyIcon.ContextMenuStrip = menu;
+    }
+
+    private void DisposeContextMenu()
+    {
+        _notifyIcon.ContextMenuStrip = null;
+        _contextMenu?.Dispose();
+        _contextMenu = null;
+    }
+
     private void OnNotifyIconMouseClick(object? sender, MouseEventArgs e)
     {
 #if DEBUG
@@ -459,10 +493,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void OnFlyoutClosed()
+    private async void OnFlyoutClosed()
     {
         if (_disposed || _isExiting) return;
         _lastFlyoutClosedTimestamp = Stopwatch.GetTimestamp();
+        StopAndDisposeTooltipTimer();
+        ApplyTooltipText();
         _settingsService.Flush();
         var closedFlyout = _flyoutForm;
         // Dispose after the close event returns, without a hidden retention timer.
@@ -470,6 +506,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             if (ReferenceEquals(_flyoutForm, closedFlyout)) DisposeClosedFlyout();
         }, null);
+
+        // Closing the UI must not cancel the user's last brightness request.
+        // Flush again after late successful writes, then release the save timer.
+        await _brightnessService.WaitForPendingWritesAsync();
+        if (!_disposed && !_isExiting && _flyoutForm is not { IsShowingOrVisible: true })
+            _settingsService.Flush();
     }
 
     private void DisposeClosedFlyout()
@@ -662,7 +704,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                     icon?.Dispose();
                 }
 
-                _contextMenu.Dispose();
+                DisposeContextMenu();
 
                 if (_flyoutForm != null)
                 {

@@ -17,11 +17,7 @@ internal partial class AppSettingsJsonContext : JsonSerializerContext
 
 public sealed class SettingsService : IDisposable
 {
-    private static readonly string SettingsDirectory =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BrightnessTray");
-
-    private static readonly string SettingsFilePath =
-        Path.Combine(SettingsDirectory, "settings.json");
+    private readonly string _settingsFilePath;
 
     private readonly object _lock = new();
     private readonly SynchronizationContext _uiSyncContext;
@@ -36,7 +32,14 @@ public sealed class SettingsService : IDisposable
     }
 
     public SettingsService(SynchronizationContext uiSyncContext)
+        : this(uiSyncContext, Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BrightnessTray", "settings.json"))
     {
+    }
+
+    internal SettingsService(SynchronizationContext uiSyncContext, string settingsFilePath)
+    {
+        _settingsFilePath = settingsFilePath;
         _uiSyncContext = uiSyncContext;
         _settings = LoadInternal();
     }
@@ -207,16 +210,16 @@ public sealed class SettingsService : IDisposable
         }
     }
 
-    private static AppSettings LoadInternal()
+    private AppSettings LoadInternal()
     {
         try
         {
-            if (!File.Exists(SettingsFilePath))
+            if (!File.Exists(_settingsFilePath))
             {
                 return new AppSettings();
             }
 
-            string json = File.ReadAllText(SettingsFilePath);
+            string json = File.ReadAllText(_settingsFilePath);
             if (string.IsNullOrWhiteSpace(json))
             {
                 return new AppSettings();
@@ -264,12 +267,13 @@ public sealed class SettingsService : IDisposable
         string? tempFilePath = null;
         try
         {
-            Directory.CreateDirectory(SettingsDirectory);
+            string directory = Path.GetDirectoryName(Path.GetFullPath(_settingsFilePath))!;
+            Directory.CreateDirectory(directory);
             string json = JsonSerializer.Serialize(_settings, AppSettingsJsonContext.Default.AppSettings);
-            tempFilePath = Path.Combine(SettingsDirectory, $"settings.json.{Guid.NewGuid():N}.tmp");
+            tempFilePath = Path.Combine(directory, $"settings.json.{Guid.NewGuid():N}.tmp");
 
             File.WriteAllText(tempFilePath, json);
-            File.Move(tempFilePath, SettingsFilePath, overwrite: true);
+            File.Move(tempFilePath, _settingsFilePath, overwrite: true);
             tempFilePath = null;
             return true;
         }

@@ -32,6 +32,7 @@ public sealed class FlyoutForm : Form
     private bool _isDarkMode;
     private long _lastClosedTimestamp;
     private bool _isRefreshing;
+    private CancellationTokenSource? _refreshCancellation;
     private bool _disposed;
     private TaskbarEdge _currentTaskbarEdge = TaskbarEdge.Bottom;
     private int _desiredHeight;
@@ -358,6 +359,7 @@ public sealed class FlyoutForm : Form
         }
 
         _lastClosedTimestamp = Stopwatch.GetTimestamp();
+        _refreshCancellation?.Cancel();
 
         if (!AnimationInterop.IsAnimationEnabled())
         {
@@ -632,14 +634,16 @@ public sealed class FlyoutForm : Form
         }
 
         _isRefreshing = true;
+        using var cancellation = new CancellationTokenSource();
+        _refreshCancellation = cancellation;
 
         try
         {
             // Query monitors off the UI thread via IBrightnessProvider
             long readVersion = _brightnessService.CaptureReadVersion();
-            var monitors = await Task.Run(() => _brightnessProvider.GetMonitors());
+            var monitors = await Task.Run(() => _brightnessProvider.GetMonitors(), cancellation.Token);
 
-            if (_disposed || IsDisposed)
+            if (_disposed || IsDisposed || cancellation.IsCancellationRequested)
             {
                 return;
             }
@@ -671,14 +675,19 @@ public sealed class FlyoutForm : Form
             // Rebuild rows dynamically
             BuildMonitorRows(monitors, readVersion);
         }
+        catch (OperationCanceledException)
+        {
+            // A closed flyout has no need for a queued hardware read.
+        }
         catch
         {
             // Fail silently, never crash
-            if (!_disposed && !IsDisposed && GetExistingRows().Count == 0)
+            if (!_disposed && !IsDisposed && !cancellation.IsCancellationRequested && GetExistingRows().Count == 0)
                 ShowStatusState(loading: false, failed: true);
         }
         finally
         {
+            _refreshCancellation = null;
             _isRefreshing = false;
         }
     }
@@ -968,6 +977,7 @@ public sealed class FlyoutForm : Form
             }
 
             _disposed = true;
+            _refreshCancellation?.Cancel();
         }
 
         base.Dispose(disposing);

@@ -84,6 +84,11 @@ public sealed class BrightnessService : IDisposable
                     {
                         state.IsPending = false;
                         state.Version = ++_brightnessVersion;
+                        lock (state.Lock)
+                        {
+                            state.DebounceCts?.Dispose();
+                            state.DebounceCts = null;
+                        }
                     }
                 }
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -105,6 +110,14 @@ public sealed class BrightnessService : IDisposable
         lock (_lifecycleLock)
         {
             return _brightnessVersion;
+        }
+    }
+
+    internal Task WaitForPendingWritesAsync()
+    {
+        lock (_lifecycleLock)
+        {
+            return Task.WhenAll(_pendingWrites.ToArray());
         }
     }
 
