@@ -24,7 +24,7 @@ public sealed class FluentContextMenu : ContextMenuStrip
         _isDarkMode = isDarkMode;
         _accentColor = accentColor ?? DwmInterop.GetAccentColor();
 
-        _fluentRenderer = new FluentMenuRenderer(_isDarkMode, _accentColor);
+        _fluentRenderer = new FluentMenuRenderer(_isDarkMode);
         Renderer = _fluentRenderer;
 
         ShowImageMargin = false;
@@ -32,9 +32,22 @@ public sealed class FluentContextMenu : ContextMenuStrip
         AutoSize = true;
         DropShadowEnabled = false; // Disable legacy GDI shadow so DWM renders native blurred shadow
 
-        float scale = (DeviceDpi > 0 ? DeviceDpi : 96) / 96f;
-        Padding = new Padding(Theme.Space4(scale), Theme.Space4(scale), Theme.Space4(scale), Theme.Space4(scale));
+        ApplyDpiMetrics();
+    }
+
+    private void ApplyDpiMetrics()
+    {
+        float scale = DeviceDpi / 96f;
+        Padding = new Padding(Theme.Space4(scale));
         MinimumSize = new Size(Theme.Scale(240, scale), 0);
+    }
+
+    protected override void OnDpiChangedAfterParent(EventArgs e)
+    {
+        base.OnDpiChangedAfterParent(e);
+        ApplyDpiMetrics();
+        PerformLayout();
+        Invalidate();
     }
 
     public override Size GetPreferredSize(Size proposedSize)
@@ -105,7 +118,7 @@ public sealed class FluentContextMenu : ContextMenuStrip
         _isDarkMode = isDark;
         _accentColor = accentColor;
 
-        _fluentRenderer.UpdateTheme(isDark, accentColor);
+        _fluentRenderer.UpdateTheme(isDark);
 
         for (int i = 0; i < Items.Count; i++)
         {

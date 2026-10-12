@@ -6,9 +6,8 @@ using BrightnessTray.Controls;
 public sealed class FlyoutGdiCache : IDisposable
 {
     public Font BodyBoldFont { get; }
+    public Font BodyFont { get; }
     public Font SecondaryFont { get; }
-    public Font GlyphSmallFont { get; }
-    public Font GlyphMediumFont { get; }
     public Font GlyphLargeFont { get; }
 
     private bool _disposed;
@@ -16,9 +15,8 @@ public sealed class FlyoutGdiCache : IDisposable
     public FlyoutGdiCache()
     {
         BodyBoldFont = FluentTypography.CreateBodyFont(FontStyle.Bold);
+        BodyFont = FluentTypography.CreateBodyFont();
         SecondaryFont = FluentTypography.CreateSecondaryFont();
-        GlyphSmallFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphSmall);
-        GlyphMediumFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphMedium);
         GlyphLargeFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphLarge);
     }
 
@@ -28,9 +26,8 @@ public sealed class FlyoutGdiCache : IDisposable
         {
             _disposed = true;
             BodyBoldFont.Dispose();
+            BodyFont.Dispose();
             SecondaryFont.Dispose();
-            GlyphSmallFont.Dispose();
-            GlyphMediumFont.Dispose();
             GlyphLargeFont.Dispose();
         }
     }

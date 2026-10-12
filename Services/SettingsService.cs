@@ -30,8 +30,6 @@ public sealed class SettingsService : IDisposable
     private System.Windows.Forms.Timer? _saveDebounceTimer;
     private bool _disposed;
 
-    public event Action<string, string?>? AliasChanged;
-
     public SettingsService()
         : this(SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext())
     {
@@ -100,15 +98,6 @@ public sealed class SettingsService : IDisposable
             }
 
             ScheduleSave();
-        }
-
-        try
-        {
-            AliasChanged?.Invoke(monitorId, sanitized);
-        }
-        catch
-        {
-            // Fail silently
         }
 
         return true;
@@ -218,7 +207,7 @@ public sealed class SettingsService : IDisposable
         }
     }
 
-    private AppSettings LoadInternal()
+    private static AppSettings LoadInternal()
     {
         try
         {
@@ -233,14 +222,41 @@ public sealed class SettingsService : IDisposable
                 return new AppSettings();
             }
 
-            var loaded = JsonSerializer.Deserialize(json, AppSettingsJsonContext.Default.AppSettings);
-            return loaded ?? new AppSettings();
+            return ParseSettings(json);
         }
         catch
         {
             // Corrupt file or I/O error: gracefully return empty default settings, never throw
             return new AppSettings();
         }
+    }
+
+    internal static AppSettings ParseSettings(string json)
+    {
+        var loaded = JsonSerializer.Deserialize(json, AppSettingsJsonContext.Default.AppSettings);
+        var settings = new AppSettings();
+
+        // JSON dictionaries do not retain our comparer and may explicitly be null.
+        if (loaded?.MonitorBrightness != null)
+        {
+            foreach (var (id, percent) in loaded.MonitorBrightness)
+            {
+                if (!string.IsNullOrWhiteSpace(id))
+                    settings.MonitorBrightness[id] = Math.Clamp(percent, 0, 100);
+            }
+        }
+
+        if (loaded?.MonitorAliases != null)
+        {
+            foreach (var (id, rawAlias) in loaded.MonitorAliases)
+            {
+                string? alias = SanitizeAlias(rawAlias);
+                if (!string.IsNullOrWhiteSpace(id) && alias != null)
+                    settings.MonitorAliases[id] = alias;
+            }
+        }
+
+        return settings;
     }
 
     private bool SaveInternal()

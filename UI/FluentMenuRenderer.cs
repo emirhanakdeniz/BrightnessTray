@@ -8,45 +8,18 @@ using BrightnessTray.Controls;
 public sealed class FluentMenuRenderer : ToolStripRenderer, IDisposable
 {
     private readonly DrawingResources _drawingResources = new();
-    private bool _isDarkMode = true;
-    private Color _accentColor = Color.FromArgb(0x00, 0x67, 0xC0);
+    private bool _isDarkMode;
 
-    public bool IsDarkMode
-    {
-        get => _isDarkMode;
-        set
-        {
-            if (_isDarkMode == value) return;
-            _isDarkMode = value;
-            _drawingResources.Clear();
-        }
-    }
-
-    public Color AccentColor
-    {
-        get => _accentColor;
-        set
-        {
-            if (_accentColor == value) return;
-            _accentColor = value;
-            _drawingResources.Clear();
-        }
-    }
-
-    public FluentMenuRenderer(bool isDarkMode, Color accentColor)
+    public FluentMenuRenderer(bool isDarkMode)
     {
         _isDarkMode = isDarkMode;
-        _accentColor = accentColor;
     }
 
-    public void UpdateTheme(bool isDarkMode, Color accentColor)
+    public void UpdateTheme(bool isDarkMode)
     {
         _drawingResources.Clear();
         _isDarkMode = isDarkMode;
-        _accentColor = accentColor;
     }
-
-
 
     protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
     {
@@ -55,9 +28,7 @@ public sealed class FluentMenuRenderer : ToolStripRenderer, IDisposable
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
         // Windows 11 dark/light menu background surface
-        Color bgColor = _isDarkMode
-            ? Color.FromArgb(43, 43, 43)
-            : Color.FromArgb(249, 249, 249);
+        Color bgColor = Theme.MenuBackground(_isDarkMode);
 
         var brush = _drawingResources.Brush(bgColor);
         g.FillRectangle(brush, e.AffectedBounds);
@@ -101,9 +72,7 @@ public sealed class FluentMenuRenderer : ToolStripRenderer, IDisposable
             itemWidth - insetH * 2 - 1,
             itemHeight - insetV * 2 - 1);
 
-        Color hoverColor = _isDarkMode
-            ? Color.FromArgb(22, 255, 255, 255)
-            : Color.FromArgb(14, 0, 0, 0);
+        Color hoverColor = Theme.MenuItemOverlay(_isDarkMode, e.Item?.Pressed == true);
 
         var path = _drawingResources.RoundedRectangle(rect, radius);
         var brush = _drawingResources.Brush(hoverColor);

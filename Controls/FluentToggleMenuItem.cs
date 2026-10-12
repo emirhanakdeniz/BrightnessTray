@@ -106,8 +106,8 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
         float scale = (Owner?.DeviceDpi ?? 96) / 96f;
-        int itemWidth = Math.Max(Width, Owner?.ClientSize.Width ?? Width);
-        int itemHeight = Math.Max(Height, Theme.Scale(36, scale));
+        int itemWidth = Width;
+        int itemHeight = Height;
 
         bool isDark = IsDarkMode;
         Color accent = AccentColor;
@@ -125,9 +125,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
                 itemWidth - insetH * 2 - 1,
                 itemHeight - insetV * 2 - 1);
 
-            Color hoverColor = isDark
-                ? Color.FromArgb(22, 255, 255, 255)
-                : Color.FromArgb(14, 0, 0, 0);
+            Color hoverColor = Theme.MenuItemOverlay(isDark, Pressed);
 
             var path = _drawingResources.RoundedRectangle(hoverRect, radius);
             var brush = _drawingResources.Brush(hoverColor);
@@ -163,7 +161,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
         if (_isChecked)
         {
             // Active state: Windows Accent Blue fill
-            var fillBrush = _drawingResources.Brush(accent);
+            var fillBrush = _drawingResources.Brush(Enabled ? accent : Theme.TextDisabled(isDark));
             g.FillPath(fillBrush, pillPath);
 
             // Circular white knob on the right
@@ -188,7 +186,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
             var trackBrush = _drawingResources.Brush(offTrackBg);
             g.FillPath(trackBrush, pillPath);
 
-            var borderPen = _drawingResources.Pen(offBorderColor, 1.5f);
+            var borderPen = _drawingResources.Pen(offBorderColor, 1.5f * scale);
             g.DrawPath(borderPen, pillPath);
 
             // Circular muted knob on the left

@@ -10,7 +10,6 @@ public sealed class FluentLabel : Control
     private ContentAlignment _textAlign = ContentAlignment.MiddleLeft;
     private bool _autoEllipsis;
     private bool _isMicaActive;
-    private bool _isDarkMode = true;
 
     public ContentAlignment TextAlign
     {
@@ -56,10 +55,9 @@ public sealed class FluentLabel : Control
         }
     }
 
-    public void UpdateTheme(bool isDark, bool isMica, Color foreColor)
+    public void UpdateTheme(bool isMica, Color foreColor)
     {
         _drawingResources.Clear();
-        _isDarkMode = isDark;
         _isMicaActive = isMica;
         ForeColor = foreColor;
         Invalidate();
@@ -73,7 +71,11 @@ public sealed class FluentLabel : Control
 
     protected override void OnPaintBackground(PaintEventArgs pevent)
     {
-        base.OnPaintBackground(pevent);
+        // Parent painting can turn DWM's black glass surface into an opaque buffered strip.
+        if (_isMicaActive)
+            pevent.Graphics.Clear(Color.FromArgb(0, 0, 0, 0));
+        else
+            base.OnPaintBackground(pevent);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -92,7 +94,9 @@ public sealed class FluentLabel : Control
             e.Graphics,
             Text,
             Font,
-            ClientRectangle,
+            new Rectangle(Padding.Left, Padding.Top,
+                Math.Max(0, ClientSize.Width - Padding.Horizontal),
+                Math.Max(0, ClientSize.Height - Padding.Vertical)),
             ForeColor,
             TextAlign,
             AutoEllipsis,

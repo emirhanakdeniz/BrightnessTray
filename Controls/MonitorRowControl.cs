@@ -1,13 +1,12 @@
 namespace BrightnessTray.Controls;
 
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using BrightnessTray.Native;
 using BrightnessTray.Services;
 using BrightnessTray.UI;
 
-public sealed class MonitorRowControl : Panel
+public sealed class MonitorRowControl : Panel, IMessageFilter
 {
     private readonly MonitorInfo _monitor;
     private readonly int _displayIndex;
@@ -16,28 +15,25 @@ public sealed class MonitorRowControl : Panel
     private readonly Action<bool>? _onEditingStateChanged;
     private readonly Action<string, string>? _onRenamed;
 
-    private readonly FluentLabel _monitorGlyph;
     private readonly FluentLabel _nameLabel;
-    private readonly FluentLabel _pencilButton;
-    private readonly FluentLabel _chevronButton;
-    private readonly FluentLabel _brightnessGlyph;
     private readonly FluentSlider _slider;
     private readonly FluentLabel _percentLabel;
 
     private readonly Panel _topPanel;
-    private readonly TableLayoutPanel _bottomTable;
+    private readonly Panel _sliderPanel;
     private readonly FluentContextMenu _nameContextMenu;
     private readonly ToolStripMenuItem _renameMenuItem;
     private readonly ToolStripMenuItem _resetMenuItem;
+    private readonly ToolStripMenuItem _expandMenuItem;
 
     private Panel? _inlineContainer;
     private TextBox? _inlineTextBox;
+    private Form? _editingForm;
 
     private string _currentDisplayName;
     private bool _isUpdatingUI;
     private bool _isDarkMode = true;
     private bool _isMicaActive;
-    private bool _isRowHovered;
     private bool _isEditing;
     private bool _isExpanded = true;
     private bool _showBottomDivider;
@@ -50,6 +46,7 @@ public sealed class MonitorRowControl : Panel
     public string DisplayName => _currentDisplayName;
     public bool IsEditing => _isEditing;
     public bool IsExpanded => _isExpanded;
+    internal int PreferredRowHeight => Scale(_isExpanded ? 68 : 36);
     public bool ShowBottomDivider
     {
         get => _showBottomDivider;
@@ -81,7 +78,7 @@ public sealed class MonitorRowControl : Panel
         _displayIndex = displayIndex;
         _brightnessService = brightnessService;
         _settingsService = settingsService;
-        _editorFont = gdiCache.SecondaryFont;
+        _editorFont = gdiCache.BodyFont;
         _onEditingStateChanged = onEditingStateChanged;
         _onRenamed = onRenamed;
 
@@ -90,68 +87,21 @@ public sealed class MonitorRowControl : Panel
         DoubleBuffered = true;
         BackColor = Color.Transparent;
         Margin = Padding.Empty;
-        Padding = new Padding(Theme.Space8(DpiScale), Theme.Space4(DpiScale), Theme.Space8(DpiScale), Theme.Space4(DpiScale));
+        Padding = new Padding(0, Theme.Space4(DpiScale), 0, Theme.Space4(DpiScale));
         TabStop = false;
 
-        // Top Row: [Monitor Icon U+E7F4] [Monitor Name (12px secondary)] [Pencil Glyph U+E70F]
+        // Keep the clickable monitor name visible when collapsed.
         _topPanel = new Panel
         {
             Dock = DockStyle.Top,
-            Height = Scale(20),
+            Height = Scale(28),
             BackColor = Color.Transparent,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
             TabStop = false
         };
 
-        _monitorGlyph = new FluentLabel(gdiCache.GlyphMediumFont)
-        {
-            Text = "\uE7F4", // Segoe Fluent Icons: TVMonitor / Screen
-            Dock = DockStyle.Left,
-            Width = Scale(20),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Margin = Padding.Empty,
-            TabStop = false
-        };
-
-        _chevronButton = new FluentLabel(gdiCache.GlyphSmallFont)
-        {
-            Text = "\uE70D", // Segoe Fluent Icons: ChevronDown
-            Dock = DockStyle.Right,
-            Width = Scale(20),
-            TextAlign = ContentAlignment.MiddleCenter,
-            Margin = Padding.Empty,
-            TabStop = false,
-            Cursor = Cursors.Hand,
-            AccessibleName = $"Collapse {_currentDisplayName} section"
-        };
-        _chevronButton.Click += (s, e) => ToggleExpanded();
-        _topPanel.Controls.Add(_chevronButton);
-
-        _pencilButton = new FluentLabel(gdiCache.GlyphSmallFont)
-        {
-            Text = "\uE70F", // Segoe Fluent Icons: Edit / Pencil
-            Dock = DockStyle.Right,
-            Width = Scale(20),
-            TextAlign = ContentAlignment.MiddleCenter,
-            Margin = Padding.Empty,
-            TabStop = false,
-            Visible = false,
-            Cursor = Cursors.Hand,
-            AccessibleName = $"Rename {_currentDisplayName}"
-        };
-        _pencilButton.Click += (s, e) => BeginInlineEdit();
-        _topPanel.Controls.Add(_pencilButton);
-
-        _topPanel.Click += (s, e) =>
-        {
-            if (!_isEditing)
-            {
-                ToggleExpanded();
-            }
-        };
-
-        _nameLabel = new FluentLabel(gdiCache.SecondaryFont)
+        _nameLabel = new FluentLabel(gdiCache.BodyFont)
         {
             Text = _currentDisplayName,
             AutoEllipsis = true,
@@ -159,10 +109,12 @@ public sealed class MonitorRowControl : Panel
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = Padding.Empty,
             TabStop = false,
-            AccessibleName = _currentDisplayName
+            Cursor = Cursors.Hand,
+            AccessibleName = _currentDisplayName,
+            AccessibleDescription = $"{_currentDisplayName}. Click to rename, or press F2."
         };
 
-        _nameLabel.MouseDoubleClick += (s, e) =>
+        _nameLabel.MouseClick += (s, e) =>
         {
             if (e.Button == MouseButtons.Left)
             {
@@ -170,12 +122,15 @@ public sealed class MonitorRowControl : Panel
             }
         };
 
-        // Context Menu on name and top panel: "Rename" and "Reset name"
+        // Keep reset and collapse actions available from the name’s context menu.
         _nameContextMenu = new FluentContextMenu();
-        _renameMenuItem = new ToolStripMenuItem("Rename", null, (s, e) => BeginInlineEdit());
-        _resetMenuItem = new ToolStripMenuItem("Reset name", null, (s, e) => ResetAlias());
+        _renameMenuItem = new FluentMenuItem("Rename", "\uE70F", (s, e) => BeginInlineEdit());
+        _resetMenuItem = new FluentMenuItem("Reset name", "\uE777", (s, e) => ResetAlias());
+        _expandMenuItem = new FluentMenuItem("Collapse", "\uE70E", (s, e) => ToggleExpanded());
         _nameContextMenu.Items.Add(_renameMenuItem);
         _nameContextMenu.Items.Add(_resetMenuItem);
+        _nameContextMenu.Items.Add(new ToolStripSeparator());
+        _nameContextMenu.Items.Add(_expandMenuItem);
 
         _nameContextMenu.Opening += (s, e) =>
         {
@@ -191,31 +146,15 @@ public sealed class MonitorRowControl : Panel
         _topPanel.ContextMenuStrip = _nameContextMenu;
 
         _topPanel.Controls.Add(_nameLabel);
-        _topPanel.Controls.Add(_monitorGlyph);
 
-        // Bottom Row: [Brightness Icon U+E706] [FluentSlider] [Percent Label (14px primary tabular)]
-        _bottomTable = new TableLayoutPanel
+        // A full-width slider keeps the display name and value on one clear line above it.
+        _sliderPanel = new Panel
         {
             Dock = DockStyle.Bottom,
             Height = Scale(32),
-            ColumnCount = 3,
-            RowCount = 1,
             BackColor = Color.Transparent,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
-            TabStop = false
-        };
-
-        _bottomTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(20)));
-        _bottomTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        _bottomTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(48)));
-
-        _brightnessGlyph = new FluentLabel(gdiCache.GlyphMediumFont)
-        {
-            Text = "\uE706", // Segoe Fluent Icons: Brightness
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            Margin = Padding.Empty,
             TabStop = false
         };
 
@@ -227,21 +166,24 @@ public sealed class MonitorRowControl : Panel
             Height = Scale(32),
             Margin = Padding.Empty,
             TabStop = true,
-            TabIndex = 0
+            TabIndex = 0,
+            AccessibleName = $"Brightness for {_currentDisplayName}"
         };
 
-        _percentLabel = new FluentLabel(gdiCache.BodyBoldFont)
+        _percentLabel = new FluentLabel(gdiCache.BodyFont)
         {
             Text = $"{_monitor.CurrentPercent}%",
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Right,
+            Width = Scale(52),
+            Padding = new Padding(0, 0, Scale(8), 0),
             TextAlign = ContentAlignment.MiddleRight,
             Margin = Padding.Empty,
             TabStop = false
         };
 
-        _bottomTable.Controls.Add(_brightnessGlyph, 0, 0);
-        _bottomTable.Controls.Add(_slider, 1, 0);
-        _bottomTable.Controls.Add(_percentLabel, 2, 0);
+        _topPanel.Controls.Add(_percentLabel);
+        _topPanel.Controls.SetChildIndex(_percentLabel, 1);
+        _sliderPanel.Controls.Add(_slider);
 
         _isUpdatingUI = true;
         try
@@ -255,12 +197,12 @@ public sealed class MonitorRowControl : Panel
 
         _slider.ValueChanged += OnSliderValueChanged;
 
-        Controls.Add(_bottomTable);
+        Controls.Add(_sliderPanel);
         Controls.Add(_topPanel);
 
-        Height = Scale(56);
+        Height = PreferredRowHeight;
 
-        // Hook recursive mouse enter/leave and mouse wheel
+        // Keep wheel adjustment available across the entire row.
         HookEvents(this);
     }
 
@@ -271,19 +213,17 @@ public sealed class MonitorRowControl : Panel
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
-        base.OnMouseWheel(e);
         if (e is HandledMouseEventArgs h)
         {
             h.Handled = true;
         }
+        base.OnMouseWheel(e);
         StepSlider(e.Delta);
     }
 
     private void HookEvents(Control control)
     {
-        control.MouseEnter += OnChildMouseEnter;
-        control.MouseLeave += OnChildMouseLeave;
-        if (control != _slider && control != _pencilButton)
+        if (control != this && control != _slider)
         {
             control.MouseWheel += OnChildMouseWheel;
         }
@@ -295,9 +235,7 @@ public sealed class MonitorRowControl : Panel
 
     private void UnhookEvents(Control control)
     {
-        control.MouseEnter -= OnChildMouseEnter;
-        control.MouseLeave -= OnChildMouseLeave;
-        if (control != _slider && control != _pencilButton)
+        if (control != this && control != _slider)
         {
             control.MouseWheel -= OnChildMouseWheel;
         }
@@ -316,39 +254,6 @@ public sealed class MonitorRowControl : Panel
         StepSlider(e.Delta);
     }
 
-    private void OnChildMouseEnter(object? sender, EventArgs e)
-    {
-        SetHovered(true);
-    }
-
-    private void OnChildMouseLeave(object? sender, EventArgs e)
-    {
-        Point clientPos = PointToClient(Cursor.Position);
-        if (!ClientRectangle.Contains(clientPos))
-        {
-            SetHovered(false);
-        }
-    }
-
-    private void SetHovered(bool hovered)
-    {
-        if (_isRowHovered != hovered)
-        {
-            _isRowHovered = hovered;
-            if (!_isEditing)
-            {
-                _pencilButton.Visible = hovered;
-            }
-
-            Color iconColor = hovered ? Theme.TextPrimary(_isDarkMode) : Theme.TextSecondary(_isDarkMode);
-            _monitorGlyph.ForeColor = iconColor;
-            _pencilButton.ForeColor = iconColor;
-            _chevronButton.ForeColor = iconColor;
-
-            Invalidate();
-        }
-    }
-
     public void ToggleExpanded()
     {
         if (_isEditing)
@@ -357,13 +262,10 @@ public sealed class MonitorRowControl : Panel
         }
 
         _isExpanded = !_isExpanded;
-        _bottomTable.Visible = _isExpanded;
-        _chevronButton.Text = _isExpanded ? "\uE70D" : "\uE76C";
-        _chevronButton.AccessibleName = _isExpanded
-            ? $"Collapse {_currentDisplayName} section"
-            : $"Expand {_currentDisplayName} section";
-
-        Height = _isExpanded ? Scale(58) : Scale(26);
+        _sliderPanel.Visible = _isExpanded;
+        _expandMenuItem.Text = _isExpanded ? "Collapse" : "Expand";
+        ((FluentMenuItem)_expandMenuItem).Glyph = _isExpanded ? "\uE70E" : "\uE70D";
+        Height = PreferredRowHeight;
         ExpandedChanged?.Invoke();
         Invalidate();
     }
@@ -379,7 +281,6 @@ public sealed class MonitorRowControl : Panel
         _onEditingStateChanged?.Invoke(true);
 
         _nameLabel.Visible = false;
-        _pencilButton.Visible = false;
 
         Color fieldBg = Theme.FieldBackground(_isDarkMode);
         Color textColor = Theme.TextPrimary(_isDarkMode);
@@ -388,8 +289,8 @@ public sealed class MonitorRowControl : Panel
         {
             Dock = DockStyle.Fill,
             BackColor = fieldBg,
-            Padding = new Padding(Theme.Space4(DpiScale), 1, Theme.Space4(DpiScale), Theme.Space4(DpiScale)),
-            Height = Scale(20),
+            Padding = new Padding(Theme.Space4(DpiScale), Theme.Space4(DpiScale), Theme.Space4(DpiScale), Theme.Space4(DpiScale)),
+            Height = Scale(32),
             TabStop = false
         };
 
@@ -408,8 +309,8 @@ public sealed class MonitorRowControl : Panel
         _inlineContainer.Paint += (s, pe) =>
         {
             var g = pe.Graphics;
-            int lineY = _inlineContainer.Height - 1;
-            var accentPen = _drawingResources.Pen(_accentColor, 2f);
+            int lineY = _inlineContainer.Height - Scale(1);
+            var accentPen = _drawingResources.Pen(_accentColor, Scale(2));
             g.DrawLine(accentPen, 0, lineY, _inlineContainer.Width, lineY);
         };
 
@@ -441,8 +342,39 @@ public sealed class MonitorRowControl : Panel
         _topPanel.Controls.Add(_inlineContainer);
         _inlineContainer.BringToFront();
 
+        // Non-focusable labels and empty space do not trigger TextBox.LostFocus.
+        // Watch mouse presses only while the editor exists, without consuming the click.
+        Application.AddMessageFilter(this);
+        _editingForm = FindForm();
+        if (_editingForm != null)
+            _editingForm.Deactivate += OnEditingFormDeactivate;
+
         _inlineTextBox.Focus();
         _inlineTextBox.SelectAll();
+    }
+
+    public bool PreFilterMessage(ref Message m)
+    {
+        if (!_isEditing || _inlineContainer == null) return false;
+
+        // Client and non-client left, right, middle, and extra-button presses.
+        if (m.Msg is 0x0201 or 0x0204 or 0x0207 or 0x020B
+            or 0x00A1 or 0x00A4 or 0x00A7 or 0x00AB)
+        {
+            Control? target = Control.FromChildHandle(m.HWnd);
+            if (target != _inlineContainer &&
+                (target == null || !_inlineContainer.Contains(target)))
+            {
+                CommitInlineEdit(_inlineTextBox?.Text ?? _currentDisplayName);
+            }
+        }
+
+        return false;
+    }
+
+    private void OnEditingFormDeactivate(object? sender, EventArgs e)
+    {
+        CommitInlineEdit(_inlineTextBox?.Text ?? _currentDisplayName);
     }
 
     public void CommitInlineEdit(string newText)
@@ -460,7 +392,7 @@ public sealed class MonitorRowControl : Panel
         _currentDisplayName = MonitorNameResolver.Resolve(_monitor.Id, _monitor.Name, _displayIndex, _settingsService);
         _nameLabel.Text = _currentDisplayName;
         _nameLabel.AccessibleName = _currentDisplayName;
-        _pencilButton.AccessibleName = $"Rename {_currentDisplayName}";
+        UpdateAccessibleNames();
 
         CleanupInlineEditor();
         _onRenamed?.Invoke(_monitor.Id, _currentDisplayName);
@@ -481,6 +413,13 @@ public sealed class MonitorRowControl : Panel
 
     private void CleanupInlineEditor()
     {
+        Application.RemoveMessageFilter(this);
+        if (_editingForm != null)
+        {
+            _editingForm.Deactivate -= OnEditingFormDeactivate;
+            _editingForm = null;
+        }
+
         if (_inlineContainer != null)
         {
             _topPanel.Controls.Remove(_inlineContainer);
@@ -490,7 +429,6 @@ public sealed class MonitorRowControl : Panel
         }
 
         _nameLabel.Visible = true;
-        _pencilButton.Visible = _isRowHovered;
     }
 
     public void ResetAlias()
@@ -499,7 +437,7 @@ public sealed class MonitorRowControl : Panel
         _currentDisplayName = MonitorNameResolver.Resolve(_monitor.Id, _monitor.Name, _displayIndex, _settingsService);
         _nameLabel.Text = _currentDisplayName;
         _nameLabel.AccessibleName = _currentDisplayName;
-        _pencilButton.AccessibleName = $"Rename {_currentDisplayName}";
+        UpdateAccessibleNames();
         _onRenamed?.Invoke(_monitor.Id, _currentDisplayName);
     }
 
@@ -514,6 +452,12 @@ public sealed class MonitorRowControl : Panel
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
+    private void UpdateAccessibleNames()
+    {
+        _nameLabel.AccessibleDescription = $"{_currentDisplayName}. Click to rename, or press F2.";
+        _slider.AccessibleName = $"Brightness for {_currentDisplayName}";
+    }
+
     protected override void OnDpiChangedAfterParent(EventArgs e)
     {
         base.OnDpiChangedAfterParent(e);
@@ -524,18 +468,13 @@ public sealed class MonitorRowControl : Panel
     {
         _drawingResources.Clear();
         float scale = DpiScale;
-        Padding = new Padding(Theme.Space8(scale), Theme.Space4(scale), Theme.Space8(scale), Theme.Space4(scale));
-        _topPanel.Height = Scale(20);
-        _monitorGlyph.Width = Scale(20);
-        _chevronButton.Width = Scale(20);
-        _pencilButton.Width = Scale(20);
-
-        _bottomTable.Height = Scale(32);
-        _bottomTable.ColumnStyles[0].Width = Scale(20);
-        _bottomTable.ColumnStyles[2].Width = Scale(48);
-
+        Padding = new Padding(0, Theme.Space4(scale), 0, Theme.Space4(scale));
+        _topPanel.Height = Scale(28);
+        _percentLabel.Width = Scale(52);
+        _percentLabel.Padding = new Padding(0, 0, Scale(8), 0);
+        _sliderPanel.Height = Scale(32);
         _slider.Height = Scale(32);
-        Height = _isExpanded ? Scale(58) : Scale(26);
+        Height = PreferredRowHeight;
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
@@ -549,18 +488,6 @@ public sealed class MonitorRowControl : Panel
         else
         {
             e.Graphics.Clear(Color.FromArgb(0, 0, 0, 0));
-        }
-
-        if (_isRowHovered)
-        {
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            int radius = Theme.Radius8(DpiScale);
-            var rect = new Rectangle(0, 0, Width - 1, Height - 1);
-
-            var path = _drawingResources.RoundedRectangle(rect, radius);
-            g.FillPath(_drawingResources.Brush(Theme.HoverOverlay(_isDarkMode)), path);
         }
 
         if (_showBottomDivider)
@@ -580,15 +507,10 @@ public sealed class MonitorRowControl : Panel
         Color primaryColor = Theme.TextPrimary(isDark);
         Color secondaryColor = Theme.TextSecondary(isDark);
 
-        Color iconColor = _isRowHovered ? primaryColor : secondaryColor;
-        _monitorGlyph.UpdateTheme(isDark, isMica, iconColor);
-        _nameLabel.UpdateTheme(isDark, isMica, primaryColor);
-        _pencilButton.UpdateTheme(isDark, isMica, iconColor);
-        _chevronButton.UpdateTheme(isDark, isMica, iconColor);
-        _brightnessGlyph.UpdateTheme(isDark, isMica, primaryColor);
-        _percentLabel.UpdateTheme(isDark, isMica, primaryColor);
+        _nameLabel.UpdateTheme(isMica, primaryColor);
+        _percentLabel.UpdateTheme(isMica, secondaryColor);
 
-        _slider.UpdateTheme(isDark, isMica, accentColor);
+        _slider.UpdateTheme(isDark, accentColor);
         _nameContextMenu.UpdateTheme(isDark, accentColor);
         if (_inlineContainer != null && _inlineTextBox != null)
         {

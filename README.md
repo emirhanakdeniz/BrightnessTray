@@ -4,7 +4,7 @@
 
 A lightweight, event-driven Windows 11 system tray application for controlling external monitor brightness via DDC/CI (Monitor Configuration API) and internal panels via WMI.
 
-Designed exclusively for Windows 11 with native Mica glass material, system accent color integration, and Per-Monitor V2 DPI scaling.
+Designed exclusively for Windows 11 with a solid theme-aware flyout, system accent color integration, and Per-Monitor V2 DPI scaling.
 
 ---
 
@@ -14,13 +14,15 @@ Designed exclusively for Windows 11 with native Mica glass material, system acce
 - **Internal Panel Support**: Automatic WMI fallback for laptops and built-in displays.
 - **Windows 11 Native UI**:
   - Light/dark flyout and menus follow the Windows app theme; the tray icon follows the Windows system theme.
-  - Mica on supported systems, with a solid background when transparency is disabled, high contrast is active, or backdrop application fails.
-  - Windows 11 Quick Settings slider visuals (4px track, system accent color fill, elevated circular thumb).
+  - A solid flyout background with native rounded window corners.
+  - A fixed Brightness header, readable two-line monitor rows, and a scrollable list when the flyout reaches the screen's working-area height.
+  - Start with Windows and Exit are available by right-clicking the tray icon.
+  - Slim brightness sliders with system accent color fill and flat circular thumbs.
   - Segoe Fluent Icons typography and smooth micro-interactions.
 - **Idle Behavior**: No periodic polling. After pending writes, saves, and OS-event debounces finish, the application waits in its message loop.
 - **Lazy Lifecycle**: The flyout is created on demand and disposed on the UI queue after closing. Fonts and drawing caches are released without forced garbage collection or working-set trimming.
 - **Optimistic UI**: Slider and middle-click changes update immediately. Slow refresh results cannot overwrite newer or pending brightness requests.
-- **Inline Renaming**: Double-click or click the pencil icon to assign persistent custom aliases to your displays.
+- **Monitor Options**: Right-click the monitor name for Rename, Reset name (when an alias exists), and Collapse/Expand. Click the name or press F2 within its row to rename inline.
 - **Start with Windows**: Native context-menu toggle with registry Run key integration.
 - **Per-Monitor V2 DPI Aware**: Pixel-perfect scaling on mixed-DPI multi-monitor setups (100%, 125%, 150%, 200%).
 - **Portable**: Can be published as a single standalone executable with no runtime or installation required.
@@ -29,7 +31,7 @@ Designed exclusively for Windows 11 with native Mica glass material, system acce
 
 ## 🖥️ Requirements
 
-- **Operating System**: Windows 11 (64-bit, build 22621 or higher recommended for Mica backdrop)
+- **Operating System**: Windows 11 (64-bit)
 - **Monitors**: External monitors with DDC/CI enabled in their on-screen display (OSD) menus
 - **Runtime**: .NET 8.0 Windows Desktop Runtime (or use the self-contained portable executable)
 
@@ -40,12 +42,17 @@ Designed exclusively for Windows 11 with native Mica glass material, system acce
 ### Controls
 - **Left-Click Tray Icon**: Open or close the brightness flyout.
 - **Slider Drag**: Adjust monitor brightness from 0% to 100%.
+- **Slider Track Click**: Jump to a level with a short visual transition; keep holding and move to drag. Grabbing the thumb preserves the pointer's offset.
 - **Mouse Wheel over Slider/Row**: Step brightness up or down by 5%.
+- **Slider Keyboard Controls**: Arrow keys adjust by 1%, Page Up/Down by 10%, and Home/End select 0%/100%.
 - **Middle-Click Tray Icon**: Quickly toggle brightness between mute (0%) and your previous level.
-- **Pencil Icon / Double-Click Name**: Edit monitor display name inline (press Enter to save, Esc to cancel).
+- **Right-Click Monitor Name**: Rename, reset a custom name, or collapse/expand that monitor's slider.
+- **Click Name / F2 within a Monitor Row**: Edit the display name inline (press Enter to save, Esc to cancel).
+- **Long Monitor Lists**: Use the vertical scrollbar to reach additional monitors; wheel input over a row continues to adjust its brightness.
 - **Right-Click Tray Icon**:
   - **Start with Windows**: Enable or disable automatic launch on Windows startup.
   - **Exit**: Cleanly terminate the application and release all resources.
+- **Flyout Dismissal**: Press Escape or click outside the flyout to close it.
 
 ---
 
@@ -76,13 +83,19 @@ Brightness is normalized to 0–100% using each monitor's reported minimum and m
 
 Writes are debounced for 120 ms per monitor and serialized for that monitor. DDC/CI retries each hardware read or write up to three times; WMI writes allow up to three attempts. The service does not add another retry layer. Exhausted failures are handled silently.
 
-Aliases and successfully applied brightness values are stored in `%APPDATA%\BrightnessTray\settings.json`. Changes use a one-second save debounce and an atomic temporary-file replacement. A failed save remains pending for a later scheduled save, flyout-close flush, or shutdown flush; there is no retry polling loop. Missing or unreadable settings fall back to defaults.
+Aliases and successfully applied brightness values are stored in `%APPDATA%\BrightnessTray\settings.json`. Changes use a one-second save debounce and an atomic temporary-file replacement. A failed save remains pending for a later scheduled save, flyout-close flush, or shutdown flush; there is no retry polling loop. Missing or unreadable settings fall back to defaults. Loaded monitor IDs are case-insensitive, brightness values are clamped to 0–100%, and aliases are sanitized; null dictionaries become empty collections.
 
 Startup, display changes, and resume refresh the monitor list and restore saved brightness when needed. Selecting **Exit** cancels queued brightness requests, waits for active writes to return, and flushes settings. Exiting during a pending debounce preserves the last successfully applied value.
 
 ## Diagnostics and Manual Verification
 
-The repository has no dedicated automated test project. Build Debug and Release, then verify behavior on Windows 11 with supported monitors.
+Run the package-free regression checks for settings loading and brightness normalization:
+
+```pwsh
+dotnet run --project Tests/BrightnessTray.RegressionTests.csproj -c Release
+```
+
+These checks do not access monitors or the user's settings file. Build Debug and Release, then verify behavior on Windows 11 with supported monitors.
 
 Close any running instance before running the lifecycle diagnostic:
 
@@ -94,6 +107,8 @@ This opens/closes the flyout and records working-set/private-memory snapshots an
 
 - Drag a slider immediately after opening; confirm it does not jump back when a refresh completes. Check wheel input and middle-click mute/restore.
 - Rename a monitor, exit, and restart; verify persistence. Disconnect a monitor during adjustment and check clean shutdown.
+- Check monitor name context menus, collapse/expand, long-name truncation, and keyboard access with Tab. With enough monitors to fill the screen, verify the header stays fixed and the last monitor is reachable using the scrollbar.
+- Grab the slider thumb at its edge and drag to both endpoints; confirm no initial jump. Test track-click-and-drag, fast wheel input, and partial wheel deltas on a precision mouse. Check the tray startup toggle and Escape versus outside-click dismissal.
 - Under **Settings → Personalization → Colors**, choose **Custom** and vary Windows mode and app mode independently. Check the tray icon against Windows mode and the flyout/menus against app mode; change the accent color and transparency effects too.
 - Under **Settings → System → Display → Scale**, check 125%, 150%, and 200%, including mixed-DPI monitors. Repeatedly open/close the flyout and verify settled idle CPU after pending work finishes.
 
@@ -106,18 +121,18 @@ BrightnessTray/
 ├── assets/
 │   └── brightnesstray-github-banner.png # GitHub README banner
 ├── Controls/
-│   ├── FluentLabel.cs          # DPI-aware GDI+ ClearType text labels
+│   ├── FluentLabel.cs          # DPI-aware text with alpha-safe backdrop rendering
 │   ├── FluentMenuItem.cs       # Windows 11 Fluent context menu items
 │   ├── FluentSlider.cs         # Windows 11 Quick Settings style brightness slider
 │   ├── FluentToggleMenuItem.cs # Win11 toggle-switch menu items
 │   ├── FluentTypography.cs     # Segoe UI Variable & Segoe Fluent Icons helper
-│   └── MonitorRowControl.cs    # Per-monitor card with slider, icon, and rename box
+│   └── MonitorRowControl.cs    # Monitor row with slider, options, and rename box
 ├── Native/
-│   ├── AnimationInterop.cs     # Easing and timing utilities
+│   ├── AnimationInterop.cs     # Windows animation preference query
 │   ├── CompositeBrightnessProvider.cs # Combines DDC/CI and WMI providers
 │   ├── DdcCiProvider.cs        # Win32 dxva2.dll DDC/CI monitor API P/Invoke
 │   ├── DisplayConfigInterop.cs # CCD DisplayConfig display topology detection
-│   ├── DwmInterop.cs           # Windows 11 DWM Mica backdrop & window attributes
+│   ├── DwmInterop.cs           # Windows 11 DWM backdrops & window attributes
 │   ├── IBrightnessProvider.cs  # Brightness provider interface
 │   ├── IconRenderer.cs         # Dynamic taskbar tray icon generator
 │   ├── MemoryInterop.cs        # Console attachment for lifecycle diagnostics
@@ -138,6 +153,7 @@ BrightnessTray/
 │   ├── FlyoutGdiCache.cs       # Fonts owned by a flyout
 │   └── Theme.cs                # Design tokens (spacing, radii, colors, metrics)
 ├── FlyoutForm.cs               # Main popup flyout with lazy lifecycle
+├── Tests/                      # Package-free settings and brightness regression checks
 ├── Program.cs                  # Entry point with single-instance mutex
 ├── TrayApplicationContext.cs   # Core application message loop & tray coordinator
 └── app.manifest                # Declares Windows 11 compatibility & PerMonitorV2

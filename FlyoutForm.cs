@@ -15,6 +15,8 @@ public sealed class FlyoutForm : Form
     private readonly BrightnessService _brightnessService;
     private readonly SettingsService _settingsService;
     private readonly Panel _contentContainer;
+    private readonly Panel _header;
+    private readonly FluentLabel _heading;
     private readonly FlyoutGdiCache _gdiCache;
     private readonly SynchronizationContext _uiSyncContext;
     private NotifyIcon? _notifyIcon;
@@ -27,13 +29,14 @@ public sealed class FlyoutForm : Form
     public event Action<string, string>? MonitorRenamed;
     public event Action? FlyoutClosed;
 
-    private BackdropKind _currentBackdrop = BackdropKind.Mica;
+    private BackdropKind _currentBackdrop = BackdropKind.None;
     private bool _isMicaActive;
     private bool _isDarkMode;
     private long _lastClosedTimestamp;
     private bool _isRefreshing;
     private bool _disposed;
     private TaskbarEdge _currentTaskbarEdge = TaskbarEdge.Bottom;
+    private int _desiredHeight;
 
     // Animation state - only created and running during active animation
     private System.Windows.Forms.Timer? _animTimer;
@@ -88,20 +91,42 @@ public sealed class FlyoutForm : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         DoubleBuffered = false; // Disabled on top-level form to avoid GDI double-buffer alpha conflicts with DWM
+        Padding = new Padding(Scale(20));
 
+        _header = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = Scale(36),
+            Padding = new Padding(0, 0, 0, Scale(8)),
+            BackColor = Color.Transparent,
+            TabIndex = 0,
+            TabStop = false
+        };
+        _heading = new FluentLabel(_gdiCache.BodyBoldFont)
+        {
+            Dock = DockStyle.Fill,
+            Text = "Brightness",
+            TextAlign = ContentAlignment.MiddleLeft,
+            TabStop = false,
+            AccessibleName = "Brightness"
+        };
+        _header.Controls.Add(_heading);
         _contentContainer = new Panel
         {
             Dock = DockStyle.Fill,
             BackColor = Color.Transparent,
             Margin = Padding.Empty,
-            Padding = new Padding(BrightnessTray.UI.Theme.Space16(DpiScale)),
+            Padding = Padding.Empty,
+            AutoScroll = true,
+            TabIndex = 1,
             TabStop = false
         };
 
         Controls.Add(_contentContainer);
+        Controls.Add(_header);
 
-        // Initial default bounds
-        UpdateFormBounds(0);
+        // A static loading state avoids showing a false empty state during discovery.
+        ShowStatusState(loading: true);
         _brightnessService.BrightnessChanged += OnBrightnessRequested;
     }
 
@@ -119,28 +144,16 @@ public sealed class FlyoutForm : Form
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
-        _contentContainer.Padding = new Padding(BrightnessTray.UI.Theme.Space16(DpiScale));
-
-        var table = _contentContainer.Controls.Count > 0 && _contentContainer.Controls[0] is TableLayoutPanel t ? t : null;
-        if (table != null)
+        Padding = new Padding(Scale(20));
+        _header.Height = Scale(36);
+        _header.Padding = new Padding(0, 0, 0, Scale(8));
+        if (_emptyStateGlyph != null && _emptyStateTitle != null)
         {
-            int count = table.RowCount;
-            int rowSpacing = BrightnessTray.UI.Theme.Space12(DpiScale);
-            for (int i = 0; i < count; i++)
-            {
-                int currentSpacing = (i < count - 1) ? rowSpacing : 0;
-                int rowHeight = (i < table.Controls.Count && table.Controls[i] is MonitorRowControl r)
-                    ? r.Height
-                    : Scale(58);
-                if (i < table.RowStyles.Count)
-                {
-                    table.RowStyles[i].Height = rowHeight + currentSpacing;
-                }
-            }
+            _emptyStateGlyph.Height = Scale(36);
+            _emptyStateTitle.Height = Scale(28);
+            _contentContainer.Controls[0].Height = Scale(112);
         }
-
-        int monitorCount = table?.RowCount ?? 0;
-        UpdateFormBounds(monitorCount);
+        RecalculateLayout();
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
@@ -185,6 +198,7 @@ public sealed class FlyoutForm : Form
         }
 
         Color accentColor = DwmInterop.GetAccentColor();
+        _heading.UpdateTheme(_isMicaActive, BrightnessTray.UI.Theme.TextPrimary(isDark));
 
         // Propagate theme to existing monitor rows without LINQ allocations
         if (_contentContainer.Controls.Count > 0 && _contentContainer.Controls[0] is TableLayoutPanel table)
@@ -198,15 +212,16 @@ public sealed class FlyoutForm : Form
             }
         }
 
-        _emptyStateGlyph?.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
-        _emptyStateTitle?.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextPrimary(isDark));
-        _emptyStateMessage?.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
+        _emptyStateGlyph?.UpdateTheme(_isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
+        _emptyStateTitle?.UpdateTheme(_isMicaActive, BrightnessTray.UI.Theme.TextPrimary(isDark));
+        _emptyStateMessage?.UpdateTheme(_isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
         Invalidate();
     }
 
     private void ApplySolidFallback(bool isDark)
     {
         DwmInterop.ClearBackdrop(Handle);
+        DwmInterop.ApplyMenuWindowAttributes(Handle, isDark);
         _isMicaActive = false;
         if (DwmInterop.IsHighContrast())
         {
@@ -274,45 +289,27 @@ public sealed class FlyoutForm : Form
 
     private MonitorRowControl? FindRowAtPoint(Point screenPt)
     {
+        // Header/scrollbar wheel input must not adjust an unrelated monitor.
+        if (!_contentContainer.RectangleToScreen(_contentContainer.ClientRectangle).Contains(screenPt))
+            return null;
         if (_contentContainer.Controls.Count == 0 || _contentContainer.Controls[0] is not TableLayoutPanel table)
         {
             return null;
         }
 
-        MonitorRowControl? firstRow = null;
-        MonitorRowControl? closestRow = null;
-        int minDistance = int.MaxValue;
-
         for (int i = 0; i < table.Controls.Count; i++)
         {
             if (table.Controls[i] is MonitorRowControl row)
             {
-                firstRow ??= row;
                 var rowScreenRect = row.RectangleToScreen(row.ClientRectangle);
                 if (rowScreenRect.Contains(screenPt))
                 {
                     return row;
                 }
-
-                int dist = 0;
-                if (screenPt.Y < rowScreenRect.Top) dist = rowScreenRect.Top - screenPt.Y;
-                else if (screenPt.Y > rowScreenRect.Bottom) dist = screenPt.Y - rowScreenRect.Bottom;
-
-                if (dist < minDistance)
-                {
-                    minDistance = dist;
-                    closestRow = row;
-                }
             }
         }
 
-        var formScreenRect = RectangleToScreen(ClientRectangle);
-        if (formScreenRect.Contains(screenPt))
-        {
-            return closestRow ?? firstRow;
-        }
-
-        return firstRow;
+        return null;
     }
 
     public bool CanReopen()
@@ -568,7 +565,7 @@ public sealed class FlyoutForm : Form
 
             var table = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 ColumnCount = 1,
                 RowCount = monitors.Count,
                 BackColor = Color.Transparent,
@@ -579,7 +576,7 @@ public sealed class FlyoutForm : Form
 
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 
-            int rowHeight = Scale(58);
+            int rowHeight = Scale(68);
             int rowSpacing = BrightnessTray.UI.Theme.Space12(DpiScale);
 
             for (int i = 0; i < monitors.Count; i++)
@@ -606,7 +603,7 @@ public sealed class FlyoutForm : Form
                 {
                     Dock = DockStyle.Fill,
                     Margin = new Padding(0, 0, 0, currentSpacing),
-                    ShowBottomDivider = (i < monitors.Count - 1)
+                    ShowBottomDivider = false
                 };
                 row.ExpandedChanged += RecalculateLayout;
                 row.UpdateTheme(isDark, _isMicaActive, accentColor);
@@ -622,7 +619,7 @@ public sealed class FlyoutForm : Form
             _contentContainer.ResumeLayout(true);
         }
 
-        UpdateFormBounds(monitors.Count);
+        RecalculateLayout();
     }
 
     private void RecalculateLayout()
@@ -637,7 +634,8 @@ public sealed class FlyoutForm : Form
                 if (table.Controls[i] is MonitorRowControl row)
                 {
                     int currentSpacing = (i < table.Controls.Count - 1) ? rowSpacing : 0;
-                    int h = row.Height;
+                    int h = row.PreferredRowHeight;
+                    row.Margin = new Padding(0, 0, 0, currentSpacing);
                     if (i < table.RowStyles.Count)
                     {
                         table.RowStyles[i].Height = h + currentSpacing;
@@ -646,18 +644,16 @@ public sealed class FlyoutForm : Form
                 }
             }
 
-            int paddingTotal = BrightnessTray.UI.Theme.Space16(DpiScale) * 2;
-            int contentHeight = paddingTotal + totalRowsHeight;
-            int width = Scale(360);
-
-            Size = new Size(width, contentHeight);
-            PositionNearTaskbar();
+            table.Height = totalRowsHeight;
+            _contentContainer.AutoScrollMinSize = new Size(0, totalRowsHeight);
+            UpdateFormBounds(table.RowCount);
         }
+        else UpdateFormBounds(0);
     }
 
     public async Task RefreshMonitorsAsync()
     {
-        if (_isRefreshing)
+        if (_isRefreshing || _disposed || IsDisposed)
         {
             return;
         }
@@ -682,7 +678,7 @@ public sealed class FlyoutForm : Form
                 // Silently keep existing cached rows if available, never show empty state during a refresh
                 if (existingRows.Count == 0)
                 {
-                    ShowEmptyState();
+                    ShowStatusState(loading: false);
                 }
                 return;
             }
@@ -705,6 +701,8 @@ public sealed class FlyoutForm : Form
         catch
         {
             // Fail silently, never crash
+            if (!_disposed && !IsDisposed && GetExistingRows().Count == 0)
+                ShowStatusState(loading: false, failed: true);
         }
         finally
         {
@@ -731,7 +729,7 @@ public sealed class FlyoutForm : Form
         }, null);
     }
 
-    private void ShowEmptyState()
+    private void ShowStatusState(bool loading, bool failed = false)
     {
         _contentContainer.SuspendLayout();
         try
@@ -742,7 +740,8 @@ public sealed class FlyoutForm : Form
 
             var emptyPanel = new Panel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                Height = Scale(112),
                 BackColor = Color.Transparent,
                 Padding = Padding.Empty,
                 TabStop = false
@@ -756,26 +755,28 @@ public sealed class FlyoutForm : Form
                 TextAlign = ContentAlignment.MiddleCenter,
                 TabStop = false
             };
-            glyph.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
+            glyph.UpdateTheme(_isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
 
             var title = new FluentLabel(_gdiCache.BodyBoldFont)
             {
-                Text = "No DDC/CI displays found",
+                Text = loading ? "Looking for displays…" : failed ? "Displays unavailable" : "No displays found",
                 Dock = DockStyle.Top,
-                Height = Scale(22),
+                Height = Scale(28),
                 TextAlign = ContentAlignment.MiddleCenter,
                 TabStop = false
             };
-            title.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextPrimary(isDark));
+            title.UpdateTheme(_isMicaActive, BrightnessTray.UI.Theme.TextPrimary(isDark));
 
             var message = new FluentLabel(_gdiCache.SecondaryFont)
             {
-                Text = "Ensure DDC/CI is enabled in your monitor's OSD menu or connect a supported display.",
+                Text = loading ? "Your displays will appear here." : failed
+                    ? "Close and reopen to try again."
+                    : "Connect a display and enable DDC/CI\nin its on-screen settings.",
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.TopCenter,
                 TabStop = false
             };
-            message.UpdateTheme(isDark, _isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
+            message.UpdateTheme(_isMicaActive, BrightnessTray.UI.Theme.TextSecondary(isDark));
             _emptyStateGlyph = glyph;
             _emptyStateTitle = title;
             _emptyStateMessage = message;
@@ -796,28 +797,28 @@ public sealed class FlyoutForm : Form
 
     private void ClearContent()
     {
+        _contentContainer.AutoScrollPosition = Point.Empty;
+        _contentContainer.AutoScrollMinSize = Size.Empty;
         _emptyStateGlyph = null;
         _emptyStateTitle = null;
         _emptyStateMessage = null;
-        foreach (Control control in _contentContainer.Controls)
+        while (_contentContainer.Controls.Count > 0)
         {
-            control.Dispose();
+            _contentContainer.Controls[0].Dispose();
         }
-        _contentContainer.Controls.Clear();
+        _activeEditingCount = 0;
     }
 
     private void UpdateFormBounds(int monitorCount)
     {
-        int width = Scale(360);
         int contentHeight;
 
         if (monitorCount == 0)
         {
-            contentHeight = BrightnessTray.UI.Theme.Space16(DpiScale) * 2 + Scale(100);
+            contentHeight = Scale(112);
         }
         else
         {
-            int paddingTotal = BrightnessTray.UI.Theme.Space16(DpiScale) * 2;
             int rowsTotal = 0;
             int spacingTotal = Math.Max(0, monitorCount - 1) * BrightnessTray.UI.Theme.Space12(DpiScale);
 
@@ -827,19 +828,19 @@ public sealed class FlyoutForm : Form
                 {
                     if (table.Controls[i] is MonitorRowControl row)
                     {
-                        rowsTotal += row.Height;
+                        rowsTotal += row.PreferredRowHeight;
                     }
                 }
             }
             else
             {
-                rowsTotal = monitorCount * Scale(58);
+                rowsTotal = monitorCount * Scale(68);
             }
 
-            contentHeight = paddingTotal + rowsTotal + spacingTotal;
+            contentHeight = rowsTotal + spacingTotal;
         }
 
-        Size = new Size(width, contentHeight);
+        _desiredHeight = Padding.Vertical + _header.Height + contentHeight;
         PositionNearTaskbar();
     }
 
@@ -857,6 +858,9 @@ public sealed class FlyoutForm : Form
 
         float dpiScale = monitorDpiScale > 0 ? monitorDpiScale : DpiScale;
         int gap = BrightnessTray.UI.Theme.FlyoutGap(dpiScale);
+        // Limit the list viewport, not individual rows, so every monitor remains reachable.
+        Size = new Size(Math.Min(Scale(360), Math.Max(1, workArea.Width - gap * 2)),
+            Math.Min(_desiredHeight, Math.Max(1, workArea.Height - gap * 2)));
 
         // Compensate for any invisible frame / drop shadow margin from DWM so visible edges are exact
         DwmInterop.TryGetVisibleFrameMargins(Handle, out Padding shadowMargins);
@@ -971,7 +975,6 @@ public sealed class FlyoutForm : Form
 
     private enum TaskbarEdge
     {
-        None,
         Bottom,
         Top,
         Left,
@@ -989,6 +992,7 @@ public sealed class FlyoutForm : Form
 
                 ClearContent();
                 _contentContainer.Dispose();
+                _header.Dispose();
                 _gdiCache.Dispose();
             }
 

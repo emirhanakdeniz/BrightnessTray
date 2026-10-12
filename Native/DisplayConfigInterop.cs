@@ -98,31 +98,10 @@ public static class DisplayConfigInterop
     /// </summary>
     public static bool HasInternalDisplay()
     {
+        if (IsInternalDisplayActive()) return true;
+
         try
         {
-            int error = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, out uint numPaths, out uint numModes);
-            if (error == 0 && numPaths > 0)
-            {
-                var paths = new DISPLAYCONFIG_PATH_INFO[numPaths];
-                var modes = new DISPLAYCONFIG_MODE_INFO[numModes];
-
-                error = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, ref numPaths, paths, ref numModes, modes, IntPtr.Zero);
-                if (error == 0)
-                {
-                    for (int i = 0; i < numPaths; i++)
-                    {
-                        uint tech = paths[i].targetInfo.outputTechnology;
-                        if (tech == DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL ||
-                            tech == DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED ||
-                            tech == DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED ||
-                            tech == DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-
             // Fallback: If device has an onboard battery, it is a laptop/mobile machine capable of internal panels
             if (GetSystemPowerStatus(out var powerStatus))
             {

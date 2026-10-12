@@ -35,6 +35,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private System.Windows.Forms.Timer? _tooltipThrottleTimer;
     private bool _disposed;
     private bool _isExiting;
+    private bool _isTogglingBrightnessMute;
 
 #if DEBUG
     private bool _loggedIdleMessage;
@@ -109,16 +110,18 @@ public sealed class TrayApplicationContext : ApplicationContext
         _ = StartupInitializationAsync();
 
 #if DEBUG
-        Application.Idle += (s, e) =>
-        {
-            if (!_loggedIdleMessage)
-            {
-                _loggedIdleMessage = true;
-                Debug.WriteLine("[IdleWatchdog] Message loop drained. Main thread is blocked waiting for OS events.");
-            }
-        };
+        Application.Idle += OnApplicationIdle;
 #endif
     }
+
+#if DEBUG
+    private void OnApplicationIdle(object? sender, EventArgs e)
+    {
+        if (_loggedIdleMessage) return;
+        _loggedIdleMessage = true;
+        Debug.WriteLine("[IdleWatchdog] Message loop drained. Main thread is blocked waiting for OS events.");
+    }
+#endif
 
     private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
     {
@@ -333,6 +336,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             if (_disposed || _isExiting) return;
             var monitors = await Task.Run(() => _brightnessProvider.GetMonitors());
+            if (_disposed || _isExiting) return;
 
             lock (_monitorStateLock)
             {
@@ -347,11 +351,11 @@ public sealed class TrayApplicationContext : ApplicationContext
                 }
             }
 
-            _uiSyncContext?.Post(_ =>
+            _uiSyncContext.Post(_ =>
             {
                 if (_disposed || _isExiting) return;
                 ApplyTooltipText();
-                if (!_disposed && _flyoutForm != null && !_flyoutForm.IsDisposed)
+                if (_flyoutForm != null && !_flyoutForm.IsDisposed)
                 {
                     _flyoutForm.SeedMonitors(monitors);
                 }
@@ -400,7 +404,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
         else if (e.Button == MouseButtons.Middle)
         {
-            ToggleBrightnessMute();
+            _ = ToggleBrightnessMuteAsync();
         }
     }
 
@@ -485,67 +489,53 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void ToggleBrightnessMute()
+    private async Task ToggleBrightnessMuteAsync()
     {
-        if (_disposed || _isExiting) return;
-        _ = Task.Run(() =>
+        if (_disposed || _isExiting || _isTogglingBrightnessMute) return;
+        _isTogglingBrightnessMute = true;
+        try
         {
-            try
-            {
-                var monitors = _brightnessProvider.GetMonitors();
-                if (monitors.Count == 0) return;
+            long readVersion = _brightnessService.CaptureReadVersion();
+            var monitors = await Task.Run(() => _brightnessProvider.GetMonitors());
+            if (_disposed || _isExiting || monitors.Count == 0) return;
 
-                // Check if any monitor currently has brightness > 0
-                bool anyAboveZero = false;
-                for (int i = 0; i < monitors.Count; i++)
+            // Keep state on the UI thread and include writes still in the debounce window.
+            var currentPercents = new int[monitors.Count];
+            bool anyAboveZero = false;
+            for (int i = 0; i < monitors.Count; i++)
+            {
+                currentPercents[i] = _brightnessService.ResolveReadBrightness(
+                    monitors[i].Id, monitors[i].CurrentPercent, readVersion);
+                anyAboveZero |= currentPercents[i] > 0;
+            }
+
+            for (int i = 0; i < monitors.Count; i++)
+            {
+                var monitor = monitors[i];
+                int targetPercent;
+                if (anyAboveZero)
                 {
-                    if (monitors[i].CurrentPercent > 0)
-                    {
-                        anyAboveZero = true;
-                        break;
-                    }
+                    if (currentPercents[i] > 0)
+                        _lastNonZeroBrightnessMap[monitor.Id] = currentPercents[i];
+                    targetPercent = 0;
+                }
+                else if (!_lastNonZeroBrightnessMap.TryGetValue(monitor.Id, out targetPercent) || targetPercent <= 0)
+                {
+                    targetPercent = 50;
                 }
 
-                for (int i = 0; i < monitors.Count; i++)
-                {
-                    var monitor = monitors[i];
-                    int targetPercent;
-                    if (anyAboveZero)
-                    {
-                        // Save previous brightness before muting to 0%
-                        if (monitor.CurrentPercent > 0)
-                        {
-                            _lastNonZeroBrightnessMap[monitor.Id] = monitor.CurrentPercent;
-                        }
-                        targetPercent = 0;
-                    }
-                    else
-                    {
-                        // Restore from last recorded level or default to 50%
-                        if (!_lastNonZeroBrightnessMap.TryGetValue(monitor.Id, out targetPercent) || targetPercent <= 0)
-                        {
-                            targetPercent = 50;
-                        }
-                    }
-
-                    _brightnessService.RequestBrightness(monitor.Id, targetPercent);
-                }
-
-                // Update flyout controls if currently open
-                _uiSyncContext?.Post(_ =>
-                {
-                    if (_disposed || _isExiting) return;
-                    if (_flyoutForm != null && !_flyoutForm.IsDisposed && _flyoutForm.Visible)
-                    {
-                        _ = _flyoutForm.RefreshMonitorsAsync();
-                    }
-                }, null);
+                // BrightnessChanged already updates both the tooltip and any open flyout.
+                _brightnessService.RequestBrightness(monitor.Id, targetPercent);
             }
-            catch
-            {
-                // Fail silently
-            }
-        });
+        }
+        catch
+        {
+            // Hardware may disappear during discovery.
+        }
+        finally
+        {
+            _isTogglingBrightnessMute = false;
+        }
     }
 
     private async void OnExitClicked(object? sender, EventArgs e)
@@ -574,7 +564,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         var sb = new StringBuilder();
         sb.AppendLine("=== Memory & Object Lifetime Diagnostic ===");
-        var proc = Process.GetCurrentProcess();
+        using var proc = Process.GetCurrentProcess();
         proc.Refresh();
         sb.AppendLine("Baseline Idle (Flyout Not Created):");
         sb.AppendLine($"  Working Set:    {proc.WorkingSet64 / 1024.0 / 1024.0:F2} MB");
@@ -657,6 +647,9 @@ public sealed class TrayApplicationContext : ApplicationContext
             {
                 _brightnessService.BrightnessChanged -= OnBrightnessChanged;
                 SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+#if DEBUG
+                Application.Idle -= OnApplicationIdle;
+#endif
 
                 StopAndDisposeTooltipTimer();
                 _systemListenerWindow.Dispose();

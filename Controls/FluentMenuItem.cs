@@ -127,8 +127,8 @@ public sealed class FluentMenuItem : ToolStripMenuItem
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
         float scale = ((Owner?.DeviceDpi ?? 0) > 0 ? Owner!.DeviceDpi : 96) / 96f;
-        int itemWidth = Math.Max(Width, Owner?.ClientSize.Width ?? Width);
-        int itemHeight = Math.Max(Height, Theme.Scale(36, scale));
+        int itemWidth = Width;
+        int itemHeight = Height;
 
         bool isDark = IsDarkMode;
 
@@ -145,9 +145,7 @@ public sealed class FluentMenuItem : ToolStripMenuItem
                 itemWidth - insetH * 2 - 1,
                 itemHeight - insetV * 2 - 1);
 
-            Color hoverColor = isDark
-                ? Color.FromArgb(22, 255, 255, 255)
-                : Color.FromArgb(14, 0, 0, 0);
+            Color hoverColor = Theme.MenuItemOverlay(isDark, Pressed);
 
             var path = _drawingResources.RoundedRectangle(hoverRect, radius);
             var brush = _drawingResources.Brush(hoverColor);

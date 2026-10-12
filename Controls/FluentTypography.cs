@@ -1,7 +1,6 @@
 namespace BrightnessTray.Controls;
 
 using System.Drawing;
-using System.Windows.Forms;
 
 public static class FluentTypography
 {
@@ -79,29 +78,6 @@ public static class FluentTypography
     // Standardized Windows 11 Fluent typography sizes from Theme tokens
     public static Font CreateBodyFont(FontStyle style = FontStyle.Regular) => CreateFont(BrightnessTray.UI.Theme.FontSizeBody, style); // ~14px
     public static Font CreateSecondaryFont(FontStyle style = FontStyle.Regular) => CreateFont(BrightnessTray.UI.Theme.FontSizeSecondary, style);   // ~12px
-
-    public static Color GetPrimaryTextColor(bool isDark) => BrightnessTray.UI.Theme.TextPrimary(isDark);
-    public static Color GetSecondaryTextColor(bool isDark) => BrightnessTray.UI.Theme.TextSecondary(isDark);
-    public static Color GetDisabledTextColor(bool isDark) => BrightnessTray.UI.Theme.TextDisabled(isDark);
-
-    public static void DrawText(
-        Graphics g,
-        string text,
-        Font font,
-        Rectangle bounds,
-        Color color,
-        ContentAlignment align = ContentAlignment.MiddleLeft,
-        bool autoEllipsis = false)
-    {
-        if (string.IsNullOrEmpty(text) || bounds.Width <= 0 || bounds.Height <= 0)
-        {
-            return;
-        }
-
-        using var brush = new SolidBrush(color);
-        using var sf = new StringFormat(StringFormat.GenericTypographic);
-        DrawText(g, text, font, bounds, brush, sf, align, autoEllipsis);
-    }
 
     internal static void DrawText(Graphics g, string text, Font font, Rectangle bounds,
         SolidBrush brush, StringFormat sf, ContentAlignment align, bool autoEllipsis,

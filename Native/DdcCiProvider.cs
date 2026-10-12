@@ -110,6 +110,8 @@ public class DdcCiProvider : IBrightnessProvider
                                 return false;
                             }
 
+                            if (max < min) return false;
+
                             uint targetBrightness = min + (uint)Math.Round((clampedPercent / 100.0) * (max - min));
                             targetBrightness = Math.Clamp(targetBrightness, min, max);
 

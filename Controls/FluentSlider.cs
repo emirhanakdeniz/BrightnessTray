@@ -17,8 +17,10 @@ public sealed class FluentSlider : Control
 
     private bool _isHovered;
     private bool _isDragging;
+    private bool _isPointerDown;
+    private int _dragOffsetX;
+    private int _wheelDeltaRemainder;
     private bool _isDarkMode = true;
-    private bool _isMicaActive;
     private Color _accentColor = Color.FromArgb(0x00, 0x67, 0xC0);
 
     // Easing animation state
@@ -31,7 +33,7 @@ public sealed class FluentSlider : Control
     // Cached GDI pens and brushes to eliminate allocations in hot paths
     private Pen? _unfilledPen;
     private Pen? _filledPen;
-    private SolidBrush? _innerBrush;
+    private SolidBrush? _thumbBrush;
     private int _lastScaleDpi = -1;
     private bool _isKeyboardFocused;
 
@@ -74,24 +76,22 @@ public sealed class FluentSlider : Control
     public int Value
     {
         get => _value;
-        set
+        set => SetValue(value, 100.0);
+    }
+
+    private void SetValue(int value, double durationMs)
+    {
+        int clamped = Math.Clamp(value, _minimum, _maximum);
+        if (_value == clamped) return;
+        _value = clamped;
+        if (_isDragging)
         {
-            int clamped = Math.Clamp(value, _minimum, _maximum);
-            if (_value != clamped)
-            {
-                _value = clamped;
-                ValueChanged?.Invoke(this, _value);
-                if (_isDragging || !AnimationInterop.IsAnimationEnabled() || !IsHandleCreated || !Visible)
-                {
-                    _visualValue = _value;
-                }
-                else
-                {
-                    StartEaseAnimation(_visualValue, _value, 100.0);
-                }
-                Invalidate();
-            }
+            StopEaseAnimation();
+            _visualValue = _value;
         }
+        else StartEaseAnimation(_visualValue, _value, durationMs);
+        ValueChanged?.Invoke(this, _value);
+        Invalidate();
     }
 
     public FluentSlider()
@@ -109,16 +109,15 @@ public sealed class FluentSlider : Control
         Size = new Size(200, 30);
     }
 
-    public void UpdateTheme(bool isDark, bool isMica, Color accentColor)
+    public void UpdateTheme(bool isDark, Color accentColor)
     {
         _isDarkMode = isDark;
-        _isMicaActive = isMica;
         _accentColor = accentColor;
         DisposeCachedGdiResources();
         Invalidate();
     }
 
-    private void EnsureGdiResources(float scale, int trackHeight)
+    private void EnsureGdiResources(int trackHeight)
     {
         int curDpi = DeviceDpi;
         if (_unfilledPen == null || _lastScaleDpi != curDpi)
@@ -133,17 +132,18 @@ public sealed class FluentSlider : Control
                 EndCap = LineCap.Round
             };
 
-            _filledPen = new Pen(_accentColor, trackHeight)
+            _filledPen = new Pen(Enabled ? _accentColor : Theme.TextDisabled(_isDarkMode), trackHeight)
             {
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round
             };
         }
 
-        if (_innerBrush == null || _innerBrush.Color != _accentColor)
+        Color dotColor = Enabled ? _accentColor : Theme.TextDisabled(_isDarkMode);
+        if (_thumbBrush == null || _thumbBrush.Color != dotColor)
         {
-            _innerBrush?.Dispose();
-            _innerBrush = new SolidBrush(_accentColor);
+            _thumbBrush?.Dispose();
+            _thumbBrush = new SolidBrush(dotColor);
         }
     }
 
@@ -154,13 +154,8 @@ public sealed class FluentSlider : Control
         _unfilledPen = null;
         _filledPen?.Dispose();
         _filledPen = null;
-        _innerBrush?.Dispose();
-        _innerBrush = null;
-    }
-
-    protected override void OnPaintBackground(PaintEventArgs pevent)
-    {
-        base.OnPaintBackground(pevent);
+        _thumbBrush?.Dispose();
+        _thumbBrush = null;
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -170,17 +165,14 @@ public sealed class FluentSlider : Control
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
         float scale = DeviceDpi / 96f;
-        int trackHeight = Math.Max(3, (int)Math.Round(4f * scale));
-        int thumbSize = _isDragging
-            ? Math.Max(18, (int)Math.Round(20f * scale))
-            : (_isHovered
-                ? Math.Max(17, (int)Math.Round(19f * scale))
-                : Math.Max(16, (int)Math.Round(18f * scale)));
+        int trackHeight = Math.Max(2, (int)Math.Round(3f * scale));
+        int thumbSize = ScalePixels(_isPointerDown ? 12 : _isHovered && Enabled ? 16 : 14);
         int thumbRadius = thumbSize / 2;
 
-        int trackLeft = thumbRadius + (int)Math.Round(2f * scale);
-        int trackRight = Width - thumbRadius - (int)Math.Round(2f * scale);
-        int trackWidth = trackRight - trackLeft;
+        var track = GetTrackBounds();
+        int trackLeft = track.Left;
+        int trackRight = track.Right;
+        int trackWidth = track.Width;
         int centerY = Height / 2;
 
         if (trackWidth <= 0)
@@ -188,10 +180,9 @@ public sealed class FluentSlider : Control
             return;
         }
 
-        double ratio = (_maximum > _minimum) ? (_visualValue - _minimum) / (_maximum - _minimum) : 0;
-        int thumbX = trackLeft + (int)Math.Round(ratio * trackWidth);
+        int thumbX = GetThumbX(_visualValue);
 
-        EnsureGdiResources(scale, trackHeight);
+        EnsureGdiResources(trackHeight);
         _drawingResources.EnsureDpi(DeviceDpi);
 
         // 1. Draw unfilled track segment across the span
@@ -206,36 +197,13 @@ public sealed class FluentSlider : Control
             g.DrawLine(_filledPen, trackLeft, centerY, Math.Min(thumbX, trackRight), centerY);
         }
 
-        // 3. Draw circular thumb (Windows 11 Quick Settings native style)
+        // A single flat accent thumb keeps the control visually quiet.
         float outerX = thumbX - thumbRadius;
         float outerY = centerY - thumbRadius;
         var outerRect = new RectangleF(outerX, outerY, thumbSize, thumbSize);
-
-        // Soft elevation drop shadow
-        var shadowBrush = _drawingResources.Brush(Color.FromArgb(_isDarkMode ? 45 : 28, 0, 0, 0));
-        g.FillEllipse(shadowBrush, outerX, outerY + 1f, thumbSize, thumbSize);
-
-        // Pure white thumb circle
-        var whiteBrush = _drawingResources.Brush(Color.White);
-        g.FillEllipse(whiteBrush, outerRect);
-
-        // Subtle 1px elevation border
-        Color borderRingColor = _isDarkMode ? Color.FromArgb(70, 255, 255, 255) : Color.FromArgb(32, 0, 0, 0);
-        var ringPen = _drawingResources.Pen(borderRingColor, 1f);
-        g.DrawEllipse(ringPen, outerRect.X + 0.5f, outerRect.Y + 0.5f, outerRect.Width - 1f, outerRect.Height - 1f);
-
-        // Inner accent dot (System Accent Color, e.g. #0067C0)
-        int dotDiameter = _isDragging
-            ? Math.Max(8, (int)Math.Round(12f * scale))
-            : (_isHovered
-                ? Math.Max(8, (int)Math.Round(11f * scale))
-                : Math.Max(6, (int)Math.Round(10f * scale)));
-        float dotRadius = dotDiameter / 2f;
-        var dotRect = new RectangleF(thumbX - dotRadius, centerY - dotRadius, dotDiameter, dotDiameter);
-
-        if (_innerBrush != null)
+        if (_thumbBrush != null)
         {
-            g.FillEllipse(_innerBrush, dotRect);
+            g.FillEllipse(_thumbBrush, outerRect);
         }
 
         // 4. Keyboard focus visual (only shown when focused via keyboard)
@@ -248,25 +216,30 @@ public sealed class FluentSlider : Control
                 outerRect.Width + 2 * focusOffset,
                 outerRect.Height + 2 * focusOffset);
 
-            var focusPen = _drawingResources.Pen(_accentColor, 1.5f);
+            var focusPen = _drawingResources.Pen(_accentColor, 1.5f * scale);
             g.DrawEllipse(focusPen, focusRect);
         }
     }
 
+    // Painting and every input path use these fixed endpoints, independent of hover/press state.
+    private Rectangle GetTrackBounds()
+    {
+        int inset = ScalePixels(10);
+        return new Rectangle(inset, Height / 2, Math.Max(0, Width - inset * 2), 0);
+    }
+
+    private int GetThumbX(double value)
+    {
+        var track = GetTrackBounds();
+        double ratio = _maximum > _minimum ? (value - _minimum) / (_maximum - _minimum) : 0;
+        return track.Left + (int)Math.Round(Math.Clamp(ratio, 0, 1) * track.Width);
+    }
+
     private int ValueFromX(int x)
     {
-        float scale = DeviceDpi / 96f;
-        int thumbRadius = (int)Math.Round(9f * scale);
-        int trackLeft = thumbRadius + (int)Math.Round(2f * scale);
-        int trackRight = Width - thumbRadius - (int)Math.Round(2f * scale);
-        int trackWidth = trackRight - trackLeft;
-
-        if (trackWidth <= 0)
-        {
-            return _minimum;
-        }
-
-        double fraction = (double)(x - trackLeft) / trackWidth;
+        var track = GetTrackBounds();
+        if (track.Width <= 0) return _minimum;
+        double fraction = (double)(x - track.Left) / track.Width;
         fraction = Math.Clamp(fraction, 0.0, 1.0);
         return (int)Math.Round(_minimum + fraction * (_maximum - _minimum));
     }
@@ -274,49 +247,41 @@ public sealed class FluentSlider : Control
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        if (e.Button == MouseButtons.Left)
+        if (Enabled && e.Button == MouseButtons.Left)
         {
             Focus();
             _isKeyboardFocused = false;
-            int targetVal = ValueFromX(e.X);
-
-            // Determine if clicking directly on thumb vs track jump
-            float scale = DeviceDpi / 96f;
-            int thumbRadius = (int)Math.Round(9f * scale);
-            int trackLeft = thumbRadius + (int)Math.Round(2f * scale);
-            int trackRight = Width - thumbRadius - (int)Math.Round(2f * scale);
-            int trackWidth = trackRight - trackLeft;
-
-            double curRatio = (_maximum > _minimum) ? (_visualValue - _minimum) / (_maximum - _minimum) : 0;
-            int curThumbX = trackLeft + (int)Math.Round(curRatio * trackWidth);
-
-            bool clickedNearThumb = Math.Abs(e.X - curThumbX) <= thumbRadius + ScalePixels(4);
+            int thumbX = GetThumbX(_visualValue);
+            bool clickedNearThumb = Math.Abs(e.X - thumbX) <= ScalePixels(16);
+            _isPointerDown = true;
+            Capture = true;
 
             if (clickedNearThumb)
             {
                 // Instant 1:1 drag
                 StopEaseAnimation();
                 _isDragging = true;
-                Capture = true;
-                _visualValue = targetVal;
-                Value = targetVal;
-                Invalidate();
+                _dragOffsetX = e.X - thumbX;
+                Value = (int)Math.Round(_visualValue);
             }
             else
             {
                 // Track click: ease to target over ~100ms, update Value optimistically
-                Value = targetVal;
-                StartEaseAnimation(_visualValue, targetVal, 100.0);
+                _dragOffsetX = 0;
+                Value = ValueFromX(e.X);
             }
+            Invalidate();
         }
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (_isDragging)
+        if (_isPointerDown && Enabled)
         {
-            int newVal = ValueFromX(e.X);
+            _isDragging = true;
+            StopEaseAnimation();
+            int newVal = ValueFromX(e.X - _dragOffsetX);
             _visualValue = newVal;
             Value = newVal;
             Invalidate();
@@ -335,12 +300,62 @@ public sealed class FluentSlider : Control
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
-        if (e.Button == MouseButtons.Left && _isDragging)
+        if (e.Button == MouseButtons.Left && _isPointerDown)
         {
+            _isPointerDown = false;
             _isDragging = false;
             Capture = false;
             Invalidate();
         }
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        base.OnMouseCaptureChanged(e);
+        if (!Capture) CancelPointerInteraction();
+    }
+
+    private void CancelPointerInteraction()
+    {
+        _isPointerDown = false;
+        _isDragging = false;
+        _dragOffsetX = 0;
+        if (Capture) Capture = false;
+        Invalidate();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (!Visible)
+        {
+            CancelPointerInteraction();
+            StopEaseAnimation();
+            _visualValue = _value;
+            _wheelDeltaRemainder = 0;
+        }
+    }
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        base.OnEnabledChanged(e);
+        if (!Enabled) CancelPointerInteraction();
+        DisposeCachedGdiResources();
+        Invalidate();
+    }
+
+    protected override void OnGotFocus(EventArgs e)
+    {
+        base.OnGotFocus(e);
+        _isKeyboardFocused = true;
+        Invalidate();
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        base.OnLostFocus(e);
+        _isKeyboardFocused = false;
+        Invalidate();
     }
 
     protected override void OnMouseEnter(EventArgs e)
@@ -353,49 +368,38 @@ public sealed class FluentSlider : Control
     protected override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
-        if (!_isDragging)
-        {
-            _isHovered = false;
-            Invalidate();
-        }
+        _isHovered = false;
+        Invalidate();
     }
-
-    private long _lastWheelStepTimestamp;
 
     public void StepValue(int delta)
     {
-        long now = Stopwatch.GetTimestamp();
-        double elapsedMs = (now - _lastWheelStepTimestamp) * 1000.0 / Stopwatch.Frequency;
-        if (elapsedMs < 35.0)
-        {
-            return;
-        }
-        _lastWheelStepTimestamp = now;
-
-        int notches = delta / 120;
-        int step = notches != 0 ? notches * 5 : (delta > 0 ? 5 : -5);
+        if (!Enabled || delta == 0) return;
+        _wheelDeltaRemainder += delta;
+        int notches = _wheelDeltaRemainder / SystemInformation.MouseWheelScrollDelta;
+        _wheelDeltaRemainder %= SystemInformation.MouseWheelScrollDelta;
+        int step = notches * 5;
         int targetVal = Math.Clamp(Value + step, _minimum, _maximum);
 
         if (targetVal != Value)
         {
-            Value = targetVal;
-            StartEaseAnimation(_visualValue, targetVal, 80.0);
+            SetValue(targetVal, 80.0);
         }
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
-        base.OnMouseWheel(e);
         if (e is HandledMouseEventArgs h)
         {
             h.Handled = true;
         }
+        base.OnMouseWheel(e);
         StepValue(e.Delta);
     }
 
     private void StartEaseAnimation(double startVal, double targetVal, double durationMs)
     {
-        if (!AnimationInterop.IsAnimationEnabled())
+        if (!IsHandleCreated || !Visible || !AnimationInterop.IsAnimationEnabled() || startVal == targetVal)
         {
             StopEaseAnimation();
             _visualValue = targetVal;
@@ -488,13 +492,11 @@ public sealed class FluentSlider : Control
                 delta = 10;
                 break;
             case Keys.Home:
-                Value = _minimum;
-                StartEaseAnimation(_visualValue, _minimum, 80.0);
+                SetValue(_minimum, 80.0);
                 e.Handled = true;
                 return;
             case Keys.End:
-                Value = _maximum;
-                StartEaseAnimation(_visualValue, _maximum, 80.0);
+                SetValue(_maximum, 80.0);
                 e.Handled = true;
                 return;
         }
@@ -504,23 +506,19 @@ public sealed class FluentSlider : Control
             int targetVal = Math.Clamp(Value + delta, _minimum, _maximum);
             if (targetVal != Value)
             {
-                Value = targetVal;
-                StartEaseAnimation(_visualValue, targetVal, 80.0);
+                SetValue(targetVal, 80.0);
             }
             e.Handled = true;
         }
     }
 
-    protected override void OnGotFocus(EventArgs e)
+    protected override void OnDpiChangedAfterParent(EventArgs e)
     {
-        base.OnGotFocus(e);
-        Invalidate();
-    }
-
-    protected override void OnLostFocus(EventArgs e)
-    {
-        base.OnLostFocus(e);
-        _isKeyboardFocused = false;
+        base.OnDpiChangedAfterParent(e);
+        CancelPointerInteraction();
+        StopEaseAnimation();
+        _visualValue = _value;
+        DisposeCachedGdiResources();
         Invalidate();
     }
 
