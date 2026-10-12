@@ -7,6 +7,7 @@ public sealed class FlyoutGdiCache : IDisposable
 {
     public Font BodyBoldFont { get; }
     public Font BodyFont { get; }
+    public Font MonitorNameFont { get; }
     public Font SecondaryFont { get; }
     public Font GlyphLargeFont { get; }
 
@@ -16,6 +17,7 @@ public sealed class FlyoutGdiCache : IDisposable
     {
         BodyBoldFont = FluentTypography.CreateBodyFont(FontStyle.Bold);
         BodyFont = FluentTypography.CreateBodyFont();
+        MonitorNameFont = FluentTypography.CreateSemiboldBodyFont();
         SecondaryFont = FluentTypography.CreateSecondaryFont();
         GlyphLargeFont = FluentTypography.CreateGlyphFont(Theme.FontSizeGlyphLarge);
     }
@@ -27,6 +29,7 @@ public sealed class FlyoutGdiCache : IDisposable
             _disposed = true;
             BodyBoldFont.Dispose();
             BodyFont.Dispose();
+            MonitorNameFont.Dispose();
             SecondaryFont.Dispose();
             GlyphLargeFont.Dispose();
         }

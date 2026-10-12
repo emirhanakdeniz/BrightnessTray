@@ -167,7 +167,7 @@ public sealed class FluentSlider : Control
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
         float scale = DeviceDpi / 96f;
-        int trackHeight = Math.Max(2, (int)Math.Round(4f * scale));
+        int trackHeight = Math.Max(2, (int)Math.Round(3f * scale));
         int thumbSize = ScalePixels(20);
         int thumbRadius = thumbSize / 2;
 

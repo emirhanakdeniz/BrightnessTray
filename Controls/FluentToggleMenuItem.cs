@@ -82,8 +82,8 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
     public override Size GetPreferredSize(Size proposedSize)
     {
         float scale = (Owner?.DeviceDpi ?? 96) / 96f;
-        int minWidth = Theme.Scale(240, scale);
-        int height = Theme.Scale(36, scale);
+        int minWidth = Theme.Scale(Theme.MenuMinWidth, scale);
+        int height = Theme.Scale(Theme.MenuItemHeight, scale);
 
         int textWidth = TextRenderer.MeasureText(Text, Font).Width;
         int totalWidth = Math.Max(minWidth, textWidth + Theme.Scale(110, scale));
@@ -110,7 +110,6 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
         int itemHeight = Height;
 
         bool isDark = IsDarkMode;
-        Color accent = AccentColor;
 
         // Draw hover pill if selected
         if (Selected && Enabled)
@@ -133,25 +132,26 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
         }
 
         Color textColor = Enabled
-            ? Theme.TextPrimary(isDark)
+            ? Theme.FlyoutText(isDark)
             : Theme.TextDisabled(isDark);
 
         // 1. Draw leading Fluent glyph
         int textLeft = Theme.Space12(scale);
         if (!string.IsNullOrEmpty(_glyph))
         {
-            int glyphSize = Theme.Scale(16, scale);
+            int glyphSize = Theme.Scale(Theme.MenuIconSize, scale);
             var glyphRect = new Rectangle(textLeft, (itemHeight - glyphSize) / 2, glyphSize, glyphSize);
 
-            var glyphFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphMedium);
-            _drawingResources.DrawText(g, _glyph, glyphFont, glyphRect, textColor, ContentAlignment.MiddleCenter);
+            var glyphFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphSmall);
+            Color iconColor = Enabled ? Theme.FlyoutIcon(isDark) : Theme.TextDisabled(isDark);
+            _drawingResources.DrawText(g, _glyph, glyphFont, glyphRect, iconColor, ContentAlignment.MiddleCenter);
 
             textLeft += glyphSize + Theme.Space12(scale);
         }
 
         // 2. Draw toggle pill on right
-        int toggleWidth = Theme.Scale(38, scale);
-        int toggleHeight = Theme.Scale(20, scale);
+        int toggleWidth = Theme.Scale(32, scale);
+        int toggleHeight = Theme.Scale(18, scale);
         int toggleX = itemWidth - toggleWidth - Theme.Space12(scale);
         int toggleY = (itemHeight - toggleHeight) / 2;
         var toggleRect = new Rectangle(toggleX, toggleY, toggleWidth, toggleHeight);
@@ -160,33 +160,29 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
         var pillPath = _drawingResources.RoundedRectangle(toggleRect, toggleRadius);
         if (_isChecked)
         {
-            // Active state: Windows Accent Blue fill
-            var fillBrush = _drawingResources.Brush(Enabled ? accent : Theme.TextDisabled(isDark));
+            // Use the same neutral active color as the brightness slider.
+            var fillBrush = _drawingResources.Brush(Enabled ? Theme.SliderFill(isDark) : Theme.TextDisabled(isDark));
             g.FillPath(fillBrush, pillPath);
 
-            // Circular white knob on the right
+            // Contrasting knob on the right indicates the enabled state.
             int knobPad = Theme.Scale(3, scale);
             int knobSize = toggleHeight - knobPad * 2;
             int knobX = toggleX + toggleWidth - knobPad - knobSize;
             int knobY = toggleY + knobPad;
 
-            var knobBrush = _drawingResources.Brush(Color.White);
+            var knobBrush = _drawingResources.Brush(Theme.MenuToggleKnob(isDark, true));
             g.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);
         }
         else
         {
             // Inactive state: subtle border and neutral dark/light background
-            Color offTrackBg = isDark
-                ? Color.FromArgb(32, 32, 32)
-                : Color.FromArgb(235, 235, 235);
-            Color offBorderColor = isDark
-                ? Color.FromArgb(120, 120, 120)
-                : Color.FromArgb(160, 160, 160);
+            Color offTrackBg = Theme.MenuBackground(isDark);
+            Color offBorderColor = Theme.FlyoutBrightnessIcon(isDark);
 
             var trackBrush = _drawingResources.Brush(offTrackBg);
             g.FillPath(trackBrush, pillPath);
 
-            var borderPen = _drawingResources.Pen(offBorderColor, 1.5f * scale);
+            var borderPen = _drawingResources.Pen(offBorderColor, scale);
             g.DrawPath(borderPen, pillPath);
 
             // Circular muted knob on the left
@@ -195,9 +191,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
             int knobX = toggleX + knobPad;
             int knobY = toggleY + knobPad;
 
-            Color knobColor = isDark
-                ? Color.FromArgb(200, 200, 200)
-                : Color.FromArgb(90, 90, 90);
+            Color knobColor = Theme.MenuToggleKnob(isDark, false);
 
             var knobBrush = _drawingResources.Brush(knobColor);
             g.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);

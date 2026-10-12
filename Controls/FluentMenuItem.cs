@@ -78,8 +78,8 @@ public sealed class FluentMenuItem : ToolStripMenuItem
     public override Size GetPreferredSize(Size proposedSize)
     {
         float scale = ((Owner?.DeviceDpi ?? 0) > 0 ? Owner!.DeviceDpi : 96) / 96f;
-        int minWidth = Theme.Scale(HasDropDownItems || Checked ? 180 : 240, scale);
-        int height = Theme.Scale(36, scale);
+        int minWidth = Theme.Scale(Theme.MenuMinWidth, scale);
+        int height = Theme.Scale(Theme.MenuItemHeight, scale);
 
         int textWidth = TextRenderer.MeasureText(Text, Font).Width;
         int totalWidth = Math.Max(minWidth, textWidth + Theme.Scale(72, scale));
@@ -97,7 +97,7 @@ public sealed class FluentMenuItem : ToolStripMenuItem
             dropDownMenu.DropShadowEnabled = false;
 
             float scale = ((Owner?.DeviceDpi ?? 0) > 0 ? Owner!.DeviceDpi : 96) / 96f;
-            dropDownMenu.Padding = new Padding(Theme.Space4(scale), Theme.Space4(scale), Theme.Space4(scale), Theme.Space4(scale));
+            dropDownMenu.Padding = new Padding(Theme.Scale(Theme.MenuPadding, scale));
 
             dropDownMenu.Opening += (s, e) =>
             {
@@ -153,18 +153,19 @@ public sealed class FluentMenuItem : ToolStripMenuItem
         }
 
         Color textColor = Enabled
-            ? Theme.TextPrimary(isDark)
+            ? Theme.FlyoutText(isDark)
             : Theme.TextDisabled(isDark);
 
         // 1. Draw leading Fluent glyph if provided
         int textLeft = Theme.Space12(scale);
         if (!string.IsNullOrEmpty(_glyph))
         {
-            int glyphSize = Theme.Scale(16, scale);
+            int glyphSize = Theme.Scale(Theme.MenuIconSize, scale);
             var glyphRect = new Rectangle(textLeft, (itemHeight - glyphSize) / 2, glyphSize, glyphSize);
 
-            var glyphFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphMedium);
-            _drawingResources.DrawText(g, _glyph, glyphFont, glyphRect, textColor, ContentAlignment.MiddleCenter);
+            var glyphFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphSmall);
+            Color iconColor = Enabled ? Theme.FlyoutIcon(isDark) : Theme.TextDisabled(isDark);
+            _drawingResources.DrawText(g, _glyph, glyphFont, glyphRect, iconColor, ContentAlignment.MiddleCenter);
 
             textLeft += glyphSize + Theme.Space12(scale);
         }
@@ -177,7 +178,7 @@ public sealed class FluentMenuItem : ToolStripMenuItem
             int chevronX = itemWidth - Theme.Space12(scale) - chevronSize;
             var chevronRect = new Rectangle(chevronX, (itemHeight - chevronSize) / 2, chevronSize, chevronSize);
             var chevronFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphSmall);
-            Color chevronColor = Theme.TextSecondary(isDark);
+            Color chevronColor = Theme.FlyoutIcon(isDark);
             _drawingResources.DrawText(g, "\uE76C", chevronFont, chevronRect, chevronColor, ContentAlignment.MiddleCenter);
             textRightPadding = Theme.Space12(scale) + chevronSize + Theme.Space8(scale);
         }
@@ -187,7 +188,7 @@ public sealed class FluentMenuItem : ToolStripMenuItem
             int checkX = itemWidth - Theme.Space12(scale) - checkSize;
             var checkRect = new Rectangle(checkX, (itemHeight - checkSize) / 2, checkSize, checkSize);
             var checkFont = _drawingResources.GlyphFont(Theme.FontSizeGlyphSmall);
-            Color checkColor = Theme.TextPrimary(isDark);
+            Color checkColor = Theme.FlyoutSecondaryText(isDark);
             _drawingResources.DrawText(g, "\uE73E", checkFont, checkRect, checkColor, ContentAlignment.MiddleCenter);
             textRightPadding = Theme.Space12(scale) + checkSize + Theme.Space8(scale);
         }

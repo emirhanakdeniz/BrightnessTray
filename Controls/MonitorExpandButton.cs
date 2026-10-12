@@ -44,7 +44,8 @@ internal sealed class MonitorExpandButton : Button
         float scale = DeviceDpi / 96f;
         float x = Width / 2f;
         float y = Height / 2f;
-        var pen = _drawingResources.Pen(ForeColor, scale);
+        Color glyphColor = _isHovered ? Theme.FlyoutText(BackColor.GetBrightness() < 0.5f) : ForeColor;
+        var pen = _drawingResources.Pen(glyphColor, scale);
         if (_isHovered)
         {
             g.FillPath(_drawingResources.Brush(Color.FromArgb(18, ForeColor)),

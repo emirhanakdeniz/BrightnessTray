@@ -79,6 +79,15 @@ public static class FluentTypography
     public static Font CreateBodyFont(FontStyle style = FontStyle.Regular) => CreateFont(BrightnessTray.UI.Theme.FontSizeBody, style); // ~14px
     public static Font CreateSecondaryFont(FontStyle style = FontStyle.Regular) => CreateFont(BrightnessTray.UI.Theme.FontSizeSecondary, style);   // ~12px
 
+    public static Font CreateSemiboldBodyFont()
+    {
+        var font = new Font("Segoe UI Semibold", BrightnessTray.UI.Theme.FontSizeBody);
+        if (string.Equals(font.FontFamily.Name, "Segoe UI Semibold", StringComparison.OrdinalIgnoreCase))
+            return font;
+        font.Dispose();
+        return CreateBodyFont(FontStyle.Bold);
+    }
+
     internal static void DrawText(Graphics g, string text, Font font, Rectangle bounds,
         SolidBrush brush, StringFormat sf, ContentAlignment align, bool autoEllipsis,
         System.Drawing.Text.TextRenderingHint renderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit)

@@ -16,6 +16,10 @@ public static class Theme
     public const int MonitorRowHeight = 72;
     public const int CollapsedMonitorRowHeight = 46;
     public const int MonitorRowHorizontalPadding = 18;
+    public const int MenuMinWidth = 264;
+    public const int MenuItemHeight = 38;
+    public const int MenuPadding = 8;
+    public const int MenuIconSize = 12;
 
     // --- Radii ---
     public const int BaseRadius4 = 4;
@@ -54,7 +58,11 @@ public static class Theme
         isDark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(229, 229, 229);
 
     public static Color MenuBackground(bool isDark) =>
-        isDark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(249, 249, 249);
+        IsHighContrast ? SystemColors.Window : BackgroundBase(isDark);
+
+    public static Color MenuToggleKnob(bool isDark, bool isChecked) =>
+        IsHighContrast ? isChecked ? SystemColors.HighlightText : SystemColors.WindowText
+            : isChecked ? BackgroundBase(isDark) : FlyoutSecondaryText(isDark);
 
     public static Color MenuItemOverlay(bool isDark, bool pressed) =>
         isDark ? Color.FromArgb(pressed ? 32 : 22, 255, 255, 255)
@@ -73,11 +81,19 @@ public static class Theme
 
     public static Color FlyoutIcon(bool isDark) =>
         IsHighContrast ? SystemColors.WindowText
-            : isDark ? Color.FromArgb(190, 190, 190) : Color.FromArgb(78, 94, 114);
+            : isDark ? Color.FromArgb(160, 160, 160) : Color.FromArgb(95, 105, 118);
+
+    public static Color FlyoutSecondaryText(bool isDark) =>
+        IsHighContrast ? SystemColors.WindowText
+            : isDark ? Color.FromArgb(178, 178, 178) : Color.FromArgb(88, 98, 111);
+
+    public static Color FlyoutBrightnessIcon(bool isDark) =>
+        IsHighContrast ? SystemColors.WindowText
+            : isDark ? Color.FromArgb(144, 144, 144) : Color.FromArgb(113, 122, 133);
 
     public static Color FlyoutDivider(bool isDark) =>
         IsHighContrast ? SystemColors.WindowText
-            : isDark ? Color.FromArgb(49, 49, 49) : Color.FromArgb(215, 224, 234);
+            : isDark ? Color.FromArgb(44, 44, 44) : Color.FromArgb(223, 229, 236);
 
     public static Color SliderThumb(bool isDark) =>
         IsHighContrast ? SystemColors.Window : isDark ? Color.FromArgb(72, 77, 73) : Color.FromArgb(210, 215, 211);

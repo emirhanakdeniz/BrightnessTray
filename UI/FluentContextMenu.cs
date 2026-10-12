@@ -14,6 +14,9 @@ public sealed class FluentContextMenu : ContextMenuStrip
     public bool IsDarkMode => _isDarkMode;
     public Color AccentColor => _accentColor;
 
+    protected override Padding DefaultPadding => new(
+        Theme.Scale(Theme.MenuPadding, (DeviceDpi > 0 ? DeviceDpi : 96) / 96f));
+
     public FluentContextMenu()
         : this(isDarkMode: !DwmInterop.IsAppsUseLightTheme(), DwmInterop.GetAccentColor())
     {
@@ -38,8 +41,9 @@ public sealed class FluentContextMenu : ContextMenuStrip
     private void ApplyDpiMetrics()
     {
         float scale = DeviceDpi / 96f;
-        Padding = new Padding(Theme.Space4(scale));
-        MinimumSize = new Size(Theme.Scale(240, scale), 0);
+        Padding = new Padding(Theme.Scale(Theme.MenuPadding, scale));
+        MinimumSize = new Size(Theme.Scale(Theme.MenuMinWidth, scale), 0);
+        BackColor = Theme.MenuBackground(_isDarkMode);
     }
 
     protected override void OnDpiChangedAfterParent(EventArgs e)
@@ -53,7 +57,7 @@ public sealed class FluentContextMenu : ContextMenuStrip
     public override Size GetPreferredSize(Size proposedSize)
     {
         float scale = (DeviceDpi > 0 ? DeviceDpi : 96) / 96f;
-        int minWidth = Theme.Scale(240, scale);
+        int minWidth = Theme.Scale(Theme.MenuMinWidth, scale);
 
         int maxItemWidth = minWidth;
         foreach (ToolStripItem item in Items)
@@ -117,6 +121,7 @@ public sealed class FluentContextMenu : ContextMenuStrip
     {
         _isDarkMode = isDark;
         _accentColor = accentColor;
+        BackColor = Theme.MenuBackground(isDark);
 
         _fluentRenderer.UpdateTheme(isDark);
 

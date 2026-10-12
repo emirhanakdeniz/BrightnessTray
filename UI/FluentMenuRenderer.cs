@@ -89,7 +89,7 @@ public sealed class FluentMenuRenderer : ToolStripRenderer, IDisposable
         int itemHeight = e.Item?.Height ?? 0;
         int y = itemHeight / 2;
 
-        Color sepColor = Theme.BorderSubtle(_isDarkMode);
+        Color sepColor = Theme.FlyoutDivider(_isDarkMode);
         var pen = _drawingResources.Pen(sepColor, 1f);
         g.DrawLine(pen, marginH, y, itemWidth - marginH, y);
     }
@@ -103,7 +103,7 @@ public sealed class FluentMenuRenderer : ToolStripRenderer, IDisposable
         }
 
         Color textColor = e.Item.Enabled
-            ? Theme.TextPrimary(_isDarkMode)
+            ? Theme.FlyoutText(_isDarkMode)
             : Theme.TextDisabled(_isDarkMode);
 
         TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;

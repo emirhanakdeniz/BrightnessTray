@@ -91,8 +91,8 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
         DoubleBuffered = true;
         BackColor = Color.Transparent;
         Margin = Padding.Empty;
-        Padding = new Padding(Scale(Theme.MonitorRowHorizontalPadding), Scale(10),
-            Scale(Theme.MonitorRowHorizontalPadding), Scale(10));
+        Padding = new Padding(Scale(Theme.MonitorRowHorizontalPadding), Scale(8),
+            Scale(Theme.MonitorRowHorizontalPadding), Scale(8));
         TabStop = false;
 
         // Keep the clickable monitor name visible when collapsed.
@@ -106,7 +106,7 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
             TabStop = false
         };
 
-        _nameLabel = new FluentLabel(gdiCache.BodyFont)
+        _nameLabel = new FluentLabel(gdiCache.MonitorNameFont)
         {
             Text = _currentDisplayName,
             AutoEllipsis = true,
@@ -191,7 +191,7 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
             AccessibleName = $"Brightness for {_currentDisplayName}"
         };
 
-        _percentLabel = new FluentLabel(gdiCache.BodyFont)
+        _percentLabel = new FluentLabel(gdiCache.SecondaryFont)
         {
             Text = $"{_monitor.CurrentPercent}%",
             Dock = DockStyle.Right,
@@ -501,8 +501,8 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
     private void ApplyDpiMetrics()
     {
         _drawingResources.Clear();
-        Padding = new Padding(Scale(Theme.MonitorRowHorizontalPadding), Scale(10),
-            Scale(Theme.MonitorRowHorizontalPadding), Scale(10));
+        Padding = new Padding(Scale(Theme.MonitorRowHorizontalPadding), Scale(8),
+            Scale(Theme.MonitorRowHorizontalPadding), Scale(8));
         _topPanel.Height = Scale(26);
         _nameLabel.Padding = new Padding(Scale(4), 0, 0, 0);
         _monitorGlyph.Width = Scale(24);
@@ -530,7 +530,8 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
         if (_showBottomDivider)
         {
             var divPen = _drawingResources.Pen(Theme.FlyoutDivider(_isDarkMode), Math.Max(1, Scale(1)));
-            e.Graphics.DrawLine(divPen, 0, Height - 1, Width, Height - 1);
+            int inset = Scale(Theme.MonitorRowHorizontalPadding);
+            e.Graphics.DrawLine(divPen, inset, Height - 1, Width - inset, Height - 1);
         }
     }
 
@@ -545,9 +546,9 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
         Color iconColor = Theme.FlyoutIcon(isDark);
 
         _nameLabel.UpdateTheme(isMica, primaryColor);
-        _percentLabel.UpdateTheme(isMica, primaryColor);
+        _percentLabel.UpdateTheme(isMica, Theme.FlyoutSecondaryText(isDark));
         _monitorGlyph.ForeColor = iconColor;
-        _brightnessGlyph.ForeColor = iconColor;
+        _brightnessGlyph.ForeColor = Theme.FlyoutBrightnessIcon(isDark);
         _expandButton.BackColor = DwmInterop.IsHighContrast() ? SystemColors.Window : Theme.BackgroundBase(isDark);
         _expandButton.ForeColor = iconColor;
 

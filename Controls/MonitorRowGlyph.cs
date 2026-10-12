@@ -29,7 +29,7 @@ internal sealed class MonitorRowGlyph : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         _drawingResources.EnsureDpi(DeviceDpi);
-        float scale = DeviceDpi / 96f * 1.15f;
+        float scale = DeviceDpi / 96f;
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var pen = _drawingResources.Pen(ForeColor, scale);
@@ -51,7 +51,7 @@ internal sealed class MonitorRowGlyph : Control
                 double angle = i * Math.PI / 4;
                 float dx = (float)Math.Cos(angle) * scale;
                 float dy = (float)Math.Sin(angle) * scale;
-                g.DrawLine(pen, x + dx * 4.5f, y + dy * 4.5f, x + dx * 6.5f, y + dy * 6.5f);
+                g.DrawLine(pen, x + dx * 4.5f, y + dy * 4.5f, x + dx * 6f, y + dy * 6f);
             }
         }
     }
