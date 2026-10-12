@@ -11,11 +11,11 @@ public static class Theme
 
     // --- Window Positioning Tokens ---
     public const int FlyoutEdgeGap = 12;
-    public const int FlyoutWidth = 276;
-    public const int FlyoutVerticalPadding = 3;
-    public const int MonitorRowHeight = 62;
-    public const int CollapsedMonitorRowHeight = 40;
-    public const int MonitorRowHorizontalPadding = 16;
+    public const int FlyoutWidth = 312;
+    public const int FlyoutVerticalPadding = 4;
+    public const int MonitorRowHeight = 72;
+    public const int CollapsedMonitorRowHeight = 46;
+    public const int MonitorRowHorizontalPadding = 18;
 
     // --- Radii ---
     public const int BaseRadius4 = 4;
@@ -61,7 +61,11 @@ public static class Theme
             : Color.FromArgb(pressed ? 22 : 14, 0, 0, 0);
 
     public static Color TrackUnfilled(bool isDark) =>
-        isDark ? Color.FromArgb(77, 77, 77) : Color.FromArgb(190, 201, 215);
+        isDark ? Color.FromArgb(155, 155, 155) : Color.FromArgb(151, 151, 151);
+
+    public static Color SliderFill(bool isDark) =>
+        IsHighContrast ? SystemColors.Highlight
+            : isDark ? Color.FromArgb(179, 191, 181) : Color.FromArgb(82, 94, 85);
 
     public static Color FlyoutText(bool isDark) =>
         IsHighContrast ? SystemColors.WindowText
@@ -76,7 +80,7 @@ public static class Theme
             : isDark ? Color.FromArgb(49, 49, 49) : Color.FromArgb(215, 224, 234);
 
     public static Color SliderThumb(bool isDark) =>
-        IsHighContrast ? SystemColors.Window : isDark ? Color.FromArgb(245, 248, 252) : Color.White;
+        IsHighContrast ? SystemColors.Window : isDark ? Color.FromArgb(72, 77, 73) : Color.FromArgb(210, 215, 211);
 
     private static bool IsHighContrast => System.Windows.Forms.SystemInformation.HighContrast;
 

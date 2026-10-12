@@ -17,7 +17,7 @@ Designed exclusively for Windows 11 with a solid theme-aware flyout, system acce
   - A compact, headerless flyout with a solid anthracite dark surface, a pale light surface, and native rounded window corners.
   - Two-line monitor rows: display icon, name, and collapse/expand chevron above a brightness icon, slider, and percentage. Subtle dividers separate displays; long lists scroll within the screen's working-area height.
   - Start with Windows and Exit are available by right-clicking the tray icon.
-  - Slim brightness sliders with system accent color fill and pale ringed thumbs.
+  - Windows brightness OSD-style sliders with a thin gray track, a dark outer thumb, and a pale center. Keyboard focus follows the system accent color.
   - Segoe Fluent Icons typography and smooth micro-interactions.
 - **Idle Behavior**: No periodic polling. After pending writes, saves, and OS-event debounces finish, the application waits in its message loop.
 - **Lazy Lifecycle**: The flyout is created on demand and disposed on the UI queue after closing. Fonts and drawing caches are released without forced garbage collection or working-set trimming.

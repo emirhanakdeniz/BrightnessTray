@@ -132,16 +132,16 @@ public sealed class FluentSlider : Control
                 EndCap = LineCap.Round
             };
 
-            Color accentColor = DwmInterop.IsHighContrast() ? SystemColors.Highlight : _accentColor;
-            _filledPen = new Pen(Enabled ? accentColor : Theme.TextDisabled(_isDarkMode), trackHeight)
+            Color fillColor = Theme.SliderFill(_isDarkMode);
+            _filledPen = new Pen(Enabled ? fillColor : Theme.TextDisabled(_isDarkMode), trackHeight)
             {
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round
             };
         }
 
-        Color dotColor = DwmInterop.IsHighContrast() ? SystemColors.Highlight
-            : Enabled ? _accentColor : Theme.TextDisabled(_isDarkMode);
+        Color dotColor = Enabled ? Theme.SliderFill(_isDarkMode)
+            : DwmInterop.IsHighContrast() ? SystemColors.GrayText : Theme.TextDisabled(_isDarkMode);
         if (_thumbBrush == null || _thumbBrush.Color != dotColor)
         {
             _thumbBrush?.Dispose();
@@ -167,8 +167,8 @@ public sealed class FluentSlider : Control
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
         float scale = DeviceDpi / 96f;
-        int trackHeight = Math.Max(2, (int)Math.Round(3f * scale));
-        int thumbSize = ScalePixels(_isPointerDown ? 12 : _isHovered && Enabled ? 16 : 14);
+        int trackHeight = Math.Max(2, (int)Math.Round(4f * scale));
+        int thumbSize = ScalePixels(20);
         int thumbRadius = thumbSize / 2;
 
         var track = GetTrackBounds();
@@ -199,29 +199,29 @@ public sealed class FluentSlider : Control
             g.DrawLine(_filledPen, trackLeft, centerY, Math.Min(thumbX, trackRight), centerY);
         }
 
-        // A pale outer ring keeps the accent center visible against the thin track.
+        // Match the Windows brightness OSD: dark outer disc with a pale center.
         float outerX = thumbX - thumbRadius;
         float outerY = centerY - thumbRadius;
         var outerRect = new RectangleF(outerX, outerY, thumbSize, thumbSize);
         g.FillEllipse(_drawingResources.Brush(Theme.SliderThumb(_isDarkMode)), outerRect);
         if (_thumbBrush != null)
         {
-            float ring = 3f * scale;
-            g.FillEllipse(_thumbBrush, outerRect.X + ring, outerRect.Y + ring,
-                outerRect.Width - 2 * ring, outerRect.Height - 2 * ring);
+            int centerSize = ScalePixels(_isPointerDown ? 8 : _isHovered && Enabled ? 12 : 10);
+            g.FillEllipse(_thumbBrush, thumbX - centerSize / 2f, centerY - centerSize / 2f,
+                centerSize, centerSize);
         }
 
         // 4. Keyboard focus visual (only shown when focused via keyboard)
         if (Focused && _isKeyboardFocused)
         {
-            float focusOffset = Math.Max(2f, 3f * scale);
+            float focusOffset = 2f * scale;
             var focusRect = new RectangleF(
                 outerRect.X - focusOffset,
                 outerRect.Y - focusOffset,
                 outerRect.Width + 2 * focusOffset,
                 outerRect.Height + 2 * focusOffset);
 
-            var focusPen = _drawingResources.Pen(_accentColor, 1.5f * scale);
+            var focusPen = _drawingResources.Pen(DwmInterop.IsHighContrast() ? SystemColors.Highlight : _accentColor, 1f * scale);
             g.DrawEllipse(focusPen, focusRect);
         }
     }
@@ -229,7 +229,7 @@ public sealed class FluentSlider : Control
     // Painting and every input path use these fixed endpoints, independent of hover/press state.
     private Rectangle GetTrackBounds()
     {
-        int inset = ScalePixels(10);
+        int inset = ScalePixels(14);
         return new Rectangle(inset, Height / 2, Math.Max(0, Width - inset * 2), 0);
     }
 

@@ -29,7 +29,7 @@ internal sealed class MonitorRowGlyph : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         _drawingResources.EnsureDpi(DeviceDpi);
-        float scale = DeviceDpi / 96f;
+        float scale = DeviceDpi / 96f * 1.15f;
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var pen = _drawingResources.Pen(ForeColor, scale);
