@@ -8,9 +8,10 @@ using BrightnessTray.Native;
 
 internal sealed class AboutForm : Form
 {
+    private const string RepositoryUrl = "https://github.com/emirhanakdeniz/BrightnessTray";
+
     private readonly Font _bodyFont = FluentTypography.CreateFont(12);
     private readonly Font _headingFont = FluentTypography.CreateFont(18, FontStyle.Bold);
-    private readonly Font _titleFont = FluentTypography.CreateFont(12);
     private readonly Font _closeGlyphFont = FluentTypography.CreateGlyphFont(12);
     private readonly Image _appImage;
     private readonly List<Label> _secondaryLabels = [];
@@ -31,7 +32,8 @@ internal sealed class AboutForm : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterScreen;
         Font = _bodyFont;
-        using (var stream = typeof(AboutForm).Assembly.GetManifestResourceStream("BrightnessTray.AppIcon")!)
+        var assembly = typeof(AboutForm).Assembly;
+        using (var stream = assembly.GetManifestResourceStream("BrightnessTray.AppIcon")!)
         using (var source = Image.FromStream(stream))
             _appImage = new Bitmap(source);
 
@@ -41,7 +43,7 @@ internal sealed class AboutForm : Form
         header.Padding = new Padding(24, 12, 16, 12);
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        var title = CreateLabel(Text, _titleFont);
+        var title = CreateLabel(Text, _bodyFont);
         title.Anchor = AnchorStyles.Left;
         foreach (Control surface in new Control[] { header, title })
         {
@@ -70,9 +72,9 @@ internal sealed class AboutForm : Form
         });
         var details = CreateTable();
         details.Controls.Add(CreateLabel("BrightnessTray", _headingFont));
-        string version = typeof(AboutForm).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion.Split('+')[0] ?? typeof(AboutForm).Assembly.GetName().Version?.ToString(3) ?? "Unknown";
-        var versionLabel = CreateLabel($"Version {version}", _titleFont, secondary: true);
+        string version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion.Split('+')[0] ?? assembly.GetName().Version?.ToString(3) ?? "Unknown";
+        var versionLabel = CreateLabel($"Version {version}", _bodyFont, secondary: true);
         versionLabel.Margin = new Padding(0, 8, 0, 20);
         details.Controls.Add(versionLabel);
         details.Controls.Add(CreateLabel("Monitor brightness control for Windows 11.", _bodyFont, secondary: true));
@@ -87,7 +89,7 @@ internal sealed class AboutForm : Form
         var divider = CreateDivider();
         footer.Controls.Add(divider);
         footer.SetColumnSpan(divider, 2);
-        var maker = CreateLabel("by ea.", _titleFont, secondary: true);
+        var maker = CreateLabel("by ea.", _bodyFont, secondary: true);
         maker.Margin = new Padding(0, 20, 0, 24);
         footer.Controls.Add(maker, 0, 1);
         footer.SetColumnSpan(maker, 2);
@@ -129,7 +131,7 @@ internal sealed class AboutForm : Form
 
     private AboutButton CreateButton(string text, string accessibleName, Action action)
     {
-        var button = new AboutButton { Text = text, AccessibleName = accessibleName, Font = _titleFont, Margin = Padding.Empty };
+        var button = new AboutButton { Text = text, AccessibleName = accessibleName, Font = _bodyFont, Margin = Padding.Empty };
         button.Click += (_, _) => action();
         _buttons.Add(button);
         return button;
@@ -139,11 +141,11 @@ internal sealed class AboutForm : Form
     {
         try
         {
-            Process.Start(new ProcessStartInfo("https://github.com/emirhanakdeniz/BrightnessTray") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(RepositoryUrl) { UseShellExecute = true });
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            MessageBox.Show(this, "Unable to open the browser.\nhttps://github.com/emirhanakdeniz/BrightnessTray", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, $"Unable to open the browser.\n{RepositoryUrl}", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 
@@ -176,7 +178,6 @@ internal sealed class AboutForm : Form
             _appImage.Dispose();
             _bodyFont.Dispose();
             _headingFont.Dispose();
-            _titleFont.Dispose();
             _closeGlyphFont.Dispose();
         }
     }

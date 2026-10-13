@@ -13,9 +13,10 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
 
     <!-- Version & Metadata -->
-    <Version>0.2.0</Version>
-    <AssemblyVersion>0.2.0.0</AssemblyVersion>
-    <FileVersion>0.2.0.0</FileVersion>
+    <Version>0.2.1</Version>
+    <AssemblyVersion>0.2.1.0</AssemblyVersion>
+    <FileVersion>0.2.1.0</FileVersion>
+    <Company>eaworks</Company>
     <Product>BrightnessTray</Product>
     <Description>Windows 11 system tray app for monitor brightness control via DDC/CI</Description>
 
