@@ -1,5 +1,6 @@
 namespace BrightnessTray.Controls;
 
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -16,6 +17,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
 
     public event EventHandler<bool>? ToggleChanged;
 
+    [DefaultValue(null)]
     public string? Glyph
     {
         get => _glyph;
@@ -29,6 +31,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
         }
     }
 
+    [DefaultValue(false)]
     public new bool Checked
     {
         get => _isChecked;
@@ -42,6 +45,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
         }
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public bool IsDarkMode
     {
         get => Owner is FluentContextMenu menu ? menu.IsDarkMode : _isDarkMode;
@@ -56,6 +60,7 @@ public sealed class FluentToggleMenuItem : ToolStripMenuItem
         }
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color AccentColor
     {
         get => Owner is FluentContextMenu menu ? menu.AccentColor : _accentColor;

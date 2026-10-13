@@ -1,5 +1,6 @@
 namespace BrightnessTray;
 
+using System.ComponentModel;
 using System.Diagnostics;
 using BrightnessTray.Controls;
 using BrightnessTray.Native;
@@ -54,6 +55,7 @@ public sealed class FlyoutForm : Form
     public bool IsShowingOrVisible => Visible || _isAnimating;
     public bool IsDarkMode => _isDarkMode;
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public BackdropKind CurrentBackdrop
     {
         get => _currentBackdrop;

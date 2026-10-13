@@ -33,7 +33,7 @@ Designed exclusively for Windows 11 with a solid theme-aware flyout, system acce
 
 - **Operating System**: Windows 11 (64-bit)
 - **Monitors**: External monitors with DDC/CI enabled in their on-screen display (OSD) menus
-- **Runtime**: .NET 8.0 Windows Desktop Runtime (or use the self-contained portable executable)
+- **Runtime**: .NET 10.0 Windows Desktop Runtime (or use the self-contained portable executable)
 
 ---
 
@@ -60,7 +60,7 @@ Designed exclusively for Windows 11 with a solid theme-aware flyout, system acce
 ## 🛠️ Building from Source
 
 ### Prerequisites
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - Windows 11 x64
 
 ### Debug Build
@@ -70,13 +70,13 @@ dotnet run -c Debug
 ```
 
 ### Produce Portable Single-File Executable
-To generate a single, standalone executable that runs without requiring .NET 8 to be pre-installed:
+To generate a single, standalone executable that runs without requiring .NET 10 to be pre-installed:
 ```pwsh
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=false -p:PublishReadyToRun=false -p:IncludeNativeLibrariesForSelfExtract=true -o dist/
 ```
 The output file will be located at `dist/BrightnessTray.exe`.
 
-Single-file compression and ReadyToRun are disabled by default to favor lower memory usage. On the same machine, lifecycle diagnostics measured about 111 MiB of startup private memory with compression enabled, 17 MiB with compression disabled and ReadyToRun enabled, and 11 MiB with both disabled. The portable executable is about 139 MiB and still runs without a pre-installed runtime. Enabling ReadyToRun can improve first-use latency at the cost of memory and file size; these measurements vary by system.
+Single-file compression and ReadyToRun are disabled by default to favor lower memory usage. Historical .NET 8 lifecycle diagnostics on the same machine measured about 111 MiB of startup private memory with compression enabled, 17 MiB with compression disabled and ReadyToRun enabled, and 11 MiB with both disabled; that portable executable was about 139 MiB. These are not .NET 10 measurements. Enabling ReadyToRun can improve first-use latency at the cost of memory and file size; measurements vary by runtime and system.
 
 ---
 

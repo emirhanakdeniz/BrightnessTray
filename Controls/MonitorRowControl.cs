@@ -1,5 +1,6 @@
 namespace BrightnessTray.Controls;
 
+using System.ComponentModel;
 using System.Drawing;
 using System.Windows.Forms;
 using BrightnessTray.Native;
@@ -51,6 +52,7 @@ public sealed class MonitorRowControl : Panel, IMessageFilter
     public bool IsEditing => _isEditing;
     public bool IsExpanded => _isExpanded;
     internal int PreferredRowHeight => Scale(_isExpanded ? Theme.MonitorRowHeight : Theme.CollapsedMonitorRowHeight);
+    [DefaultValue(false)]
     public bool ShowBottomDivider
     {
         get => _showBottomDivider;

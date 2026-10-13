@@ -1,5 +1,6 @@
 namespace BrightnessTray.Controls;
 
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -12,6 +13,7 @@ public sealed class FluentMenuItem : ToolStripMenuItem
     private string? _glyph;
     private bool _isDarkMode = true;
 
+    [DefaultValue(null)]
     public string? Glyph
     {
         get => _glyph;
@@ -25,6 +27,7 @@ public sealed class FluentMenuItem : ToolStripMenuItem
         }
     }
 
+    [DefaultValue(false)]
     public new bool Checked
     {
         get => base.Checked;
@@ -38,6 +41,7 @@ public sealed class FluentMenuItem : ToolStripMenuItem
         }
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public bool IsDarkMode
     {
         get

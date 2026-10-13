@@ -1,5 +1,6 @@
 namespace BrightnessTray.Controls;
 
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -39,6 +40,7 @@ public sealed class FluentSlider : Control
 
     public event EventHandler<int>? ValueChanged;
 
+    [DefaultValue(0)]
     public int Minimum
     {
         get => _minimum;
@@ -56,6 +58,7 @@ public sealed class FluentSlider : Control
         }
     }
 
+    [DefaultValue(100)]
     public int Maximum
     {
         get => _maximum;
@@ -73,6 +76,7 @@ public sealed class FluentSlider : Control
         }
     }
 
+    [DefaultValue(0)]
     public int Value
     {
         get => _value;

@@ -1,5 +1,6 @@
 namespace BrightnessTray.Controls;
 
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using BrightnessTray.UI;
 
@@ -9,6 +10,7 @@ internal sealed class MonitorExpandButton : Button
     private bool _isExpanded = true;
     private bool _isHovered;
 
+    [DefaultValue(true)]
     public bool IsExpanded
     {
         get => _isExpanded;

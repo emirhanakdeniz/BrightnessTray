@@ -1,5 +1,6 @@
 namespace BrightnessTray.Controls;
 
+using System.ComponentModel;
 using System.Drawing;
 using System.Windows.Forms;
 using BrightnessTray.UI;
@@ -11,6 +12,7 @@ public sealed class FluentLabel : Control
     private bool _autoEllipsis;
     private bool _isMicaActive;
 
+    [DefaultValue(ContentAlignment.MiddleLeft)]
     public ContentAlignment TextAlign
     {
         get => _textAlign;
@@ -24,6 +26,7 @@ public sealed class FluentLabel : Control
         }
     }
 
+    [DefaultValue(false)]
     public bool AutoEllipsis
     {
         get => _autoEllipsis;
