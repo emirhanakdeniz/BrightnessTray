@@ -21,6 +21,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly SynchronizationContext _uiSyncContext;
 
     private FlyoutForm? _flyoutForm;
+    private AboutForm? _aboutForm;
     private long _lastFlyoutClosedTimestamp;
 
     private readonly object _monitorStateLock = new();
@@ -129,6 +130,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 #endif
         RefreshTrayIcon(recreateTrayIcon: false);
         _contextMenu?.UpdateTheme(isDark: !DwmInterop.IsAppsUseLightTheme(), DwmInterop.GetAccentColor());
+        _aboutForm?.UpdateTheme();
 
         if (_flyoutForm != null && !_flyoutForm.IsDisposed)
         {
@@ -418,6 +420,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.AddRange([
             startupItem,
             new ToolStripSeparator(),
+            new FluentMenuItem("About BrightnessTray", "\uE946", OnAboutClicked),
             new FluentMenuItem("Exit", "\uE7E8", OnExitClicked)
         ]);
         menu.UpdateTheme(!DwmInterop.IsAppsUseLightTheme(), DwmInterop.GetAccentColor());
@@ -432,6 +435,24 @@ public sealed class TrayApplicationContext : ApplicationContext
         };
         _contextMenu = menu;
         _notifyIcon.ContextMenuStrip = menu;
+    }
+
+    private void OnAboutClicked(object? sender, EventArgs e)
+    {
+        if (_disposed || _isExiting) return;
+        if (_aboutForm != null && !_aboutForm.IsDisposed)
+        {
+            _aboutForm.Activate();
+            return;
+        }
+
+        var aboutForm = new AboutForm();
+        aboutForm.FormClosed += (_, _) =>
+        {
+            if (ReferenceEquals(_aboutForm, aboutForm)) _aboutForm = null;
+        };
+        _aboutForm = aboutForm;
+        aboutForm.Show();
     }
 
     private void DisposeContextMenu()
@@ -789,6 +810,9 @@ public sealed class TrayApplicationContext : ApplicationContext
                 }
 
                 DisposeContextMenu();
+
+                _aboutForm?.Dispose();
+                _aboutForm = null;
 
                 if (_flyoutForm != null)
                 {

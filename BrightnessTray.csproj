@@ -36,6 +36,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="icon.png" LogicalName="BrightnessTray.AppIcon" />
     <InternalsVisibleTo Include="BrightnessTray.RegressionTests" />
     <Compile Remove="Tests/**/*.cs" />
     <PackageReference Include="System.Management" Version="10.0.12" />
