@@ -72,9 +72,11 @@ dotnet run -c Debug
 ### Produce Portable Single-File Executable
 To generate a single, standalone executable that runs without requiring .NET 8 to be pre-installed:
 ```pwsh
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist/
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=false -p:PublishReadyToRun=false -p:IncludeNativeLibrariesForSelfExtract=true -o dist/
 ```
 The output file will be located at `dist/BrightnessTray.exe`.
+
+Single-file compression and ReadyToRun are disabled by default to favor lower memory usage. On the same machine, lifecycle diagnostics measured about 111 MiB of startup private memory with compression enabled, 17 MiB with compression disabled and ReadyToRun enabled, and 11 MiB with both disabled. The portable executable is about 139 MiB and still runs without a pre-installed runtime. Enabling ReadyToRun can improve first-use latency at the cost of memory and file size; these measurements vary by system.
 
 ---
 
@@ -82,15 +84,17 @@ The output file will be located at `dist/BrightnessTray.exe`.
 
 Brightness is normalized to 0–100% using each monitor's reported minimum and maximum. Hardware reads and writes run off the UI thread; physical monitor handles are opened on demand and released after use.
 
-Writes are debounced for 120 ms per monitor and serialized for that monitor. DDC/CI retries each hardware read or write up to three times; WMI writes allow up to three attempts. The service does not add another retry layer. Exhausted failures are handled silently.
+Writes are debounced for 120 ms per monitor and serialized by one worker while requests are pending. Slider movements update the worker's final target without creating a task or cancellation source for each movement; workers stop when their work finishes. DDC/CI caches only brightness ranges, never physical monitor handles, and reloads ranges after invalidation or failure. DDC/CI retries each hardware read or write up to three times; WMI writes allow up to three attempts. The service does not add another retry layer. Exhausted failures are handled silently.
 
 Aliases and successfully applied brightness values are stored in `%APPDATA%\BrightnessTray\settings.json`. Changes use a one-second save debounce and an atomic temporary-file replacement. A failed save remains pending for a later scheduled save, flyout-close flush, or shutdown flush; there is no retry polling loop. Missing or unreadable settings fall back to defaults. Loaded monitor IDs are case-insensitive, brightness values are clamped to 0–100%, and aliases are sanitized; null dictionaries become empty collections.
 
 Startup, display changes, and resume refresh the monitor list and restore saved brightness when needed. Selecting **Exit** cancels queued brightness requests, waits for active writes to return, and flushes settings. Exiting during a pending debounce preserves the last successfully applied value.
 
+Startup, flyout refreshes, and mute/restore share a hardware scan already in progress. Topology changes discard stale results and schedule a fresh scan; closing a flyout cancels its wait without canceling other consumers. DDC/CI ranges and WMI monitor names are invalidated on display changes and resume, and provider faults invalidate their metadata. WMI still reads current brightness on each scan. Read versions keep a shared scan's old brightness from overwriting newer slider requests.
+
 ## Diagnostics and Manual Verification
 
-Run the package-free regression checks for settings loading, brightness normalization, and chevron repainting:
+Run the package-free regression checks for settings loading, brightness normalization, chevron repainting, shared discovery, metadata caches, slider bursts, and safe shutdown:
 
 ```pwsh
 dotnet run --project Tests/BrightnessTray.RegressionTests.csproj -c Release
@@ -105,6 +109,14 @@ dotnet run -c Debug -- --test-lifecycle
 ```
 
 This opens/closes the flyout and records working-set/private-memory snapshots and creation timings in `lifecycle_results.txt` in the working directory. The report is overwritten on each run and ignored by Git. It is a diagnostic snapshot, not an idle-CPU or leak test.
+
+For 100 additional flyout cycles, GDI/USER handle checkpoints, and a 60-second settled idle CPU sample:
+
+```pwsh
+dotnet run -c Release -- --test-lifecycle --stress
+```
+
+This also writes `performance_results.txt` in the working directory. Allow about two minutes. It uses diagnostic-only timers and a real message loop for idle measurement; no forced GC or working-set trimming is performed. Checkpoint counts help distinguish initial framework caches from resources that keep growing. Real monitor disconnects, laptop WMI behavior, and visual/DPI behavior still require manual verification.
 
 - Drag a slider immediately after opening; confirm it does not jump back when a refresh completes. Check wheel input and middle-click mute/restore.
 - Rename a monitor, exit, and restart; verify persistence. Disconnect a monitor during adjustment and check clean shutdown.

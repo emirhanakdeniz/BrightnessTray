@@ -4,4 +4,5 @@ public interface IBrightnessProvider
 {
     IReadOnlyList<MonitorInfo> GetMonitors();
     bool TrySetBrightness(string monitorId, int percent);
+    void InvalidateCache() { }
 }

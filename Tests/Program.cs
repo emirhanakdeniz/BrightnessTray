@@ -54,7 +54,23 @@ var cases = new (string Name, Action Run)[]
             Equal(expected, monitor.CurrentPercent);
         }
     }),
-    ("Chevron repaints recycled pixels in both themes", ChevronPaintingRegression.Run)
+    ("Chevron repaints recycled pixels in both themes", ChevronPaintingRegression.Run),
+    ("Shared monitor scans and local cancellation", PerformanceRegression.SharedScan),
+    ("Topology changes discard scans already running", PerformanceRegression.InvalidatedScan),
+    ("Failed monitor scans can be retried", PerformanceRegression.FailedScan),
+    ("Topology events survive hardware scan failures", PerformanceRegression.FailedInvalidatedScan),
+    ("Shared scans preserve their brightness read version", PerformanceRegression.ReadVersion),
+    ("Slider burst uses one worker and preserves the final value", PerformanceRegression.SliderBurst),
+    ("New requests survive writes already running", PerformanceRegression.LatestWrite),
+    ("Monitors write independently", PerformanceRegression.IndependentMonitors),
+    ("Shutdown waits for native writes and records success", PerformanceRegression.Shutdown),
+    ("Shutdown cancels queued debounce work", PerformanceRegression.CancelDebounce),
+    ("Failed writes do not save settings and can be retried", PerformanceRegression.FailedWrite),
+    ("DDC writes reuse normalized ranges and invalidate on faults", PerformanceRegression.DdcRange),
+    ("Old DDC discoveries cannot repopulate invalidated ranges", PerformanceRegression.OldDdcRange),
+    ("WMI names are cached, invalidated and retried on failure", PerformanceRegression.WmiNames),
+    ("WMI loads spanning invalidation cannot repopulate metadata", PerformanceRegression.OldWmiNames),
+    ("Composite invalidation reaches every provider", PerformanceRegression.CompositeInvalidation)
 };
 
 int failures = 0;

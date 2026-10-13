@@ -15,6 +15,7 @@ internal static class Program
             ApplicationConfiguration.Initialize();
             using var ctx = new TrayApplicationContext();
             ctx.RunLifecycleTest();
+            if (args.Contains("--stress")) ctx.RunPerformanceTest();
             return;
         }
 

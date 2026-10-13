@@ -11,7 +11,7 @@ public sealed class FlyoutForm : Form
     private const double OpenDurationMs = 167.0;
     private const double CloseDurationMs = 100.0;
 
-    private readonly IBrightnessProvider _brightnessProvider;
+    private readonly MonitorDiscoveryService _monitorDiscovery;
     private readonly BrightnessService _brightnessService;
     private readonly SettingsService _settingsService;
     private readonly Panel _contentContainer;
@@ -74,9 +74,10 @@ public sealed class FlyoutForm : Form
         IBrightnessProvider brightnessProvider,
         BrightnessService brightnessService,
         SettingsService settingsService,
-        NotifyIcon? notifyIcon = null)
+        NotifyIcon? notifyIcon = null,
+        MonitorDiscoveryService? monitorDiscovery = null)
     {
-        _brightnessProvider = brightnessProvider;
+        _monitorDiscovery = monitorDiscovery ?? new MonitorDiscoveryService(brightnessProvider, brightnessService);
         _brightnessService = brightnessService;
         _uiSyncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settingsService = settingsService;
@@ -640,8 +641,15 @@ public sealed class FlyoutForm : Form
         try
         {
             // Query monitors off the UI thread via IBrightnessProvider
-            long readVersion = _brightnessService.CaptureReadVersion();
-            var monitors = await Task.Run(() => _brightnessProvider.GetMonitors(), cancellation.Token);
+            MonitorDiscoveryService.Snapshot snapshot;
+            do
+            {
+                // Closing this flyout cancels only its wait, not a scan shared with startup.
+                snapshot = await _monitorDiscovery.GetMonitorsAsync().WaitAsync(cancellation.Token);
+                if (_disposed || IsDisposed || cancellation.IsCancellationRequested) return;
+            } while (!_monitorDiscovery.IsCurrent(snapshot));
+            long readVersion = snapshot.ReadVersion;
+            var monitors = snapshot.Monitors;
 
             if (_disposed || IsDisposed || cancellation.IsCancellationRequested)
             {

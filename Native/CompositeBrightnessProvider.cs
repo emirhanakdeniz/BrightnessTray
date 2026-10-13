@@ -1,20 +1,25 @@
 namespace BrightnessTray.Native;
 
-using System.Collections.Concurrent;
-
 public sealed class CompositeBrightnessProvider : IBrightnessProvider
 {
     private readonly IReadOnlyList<IBrightnessProvider> _providers;
-    private readonly ConcurrentDictionary<string, IBrightnessProvider> _providerMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly TopologyCache<IBrightnessProvider> _providerMap = new();
 
     public CompositeBrightnessProvider(params IBrightnessProvider[] providers)
     {
         _providers = providers;
     }
 
+    public void InvalidateCache()
+    {
+        _providerMap.Invalidate();
+        foreach (var provider in _providers) provider.InvalidateCache();
+    }
+
     public IReadOnlyList<MonitorInfo> GetMonitors()
     {
         var allMonitors = new List<MonitorInfo>();
+        long generation = _providerMap.Generation;
 
         foreach (var provider in _providers)
         {
@@ -23,7 +28,7 @@ public sealed class CompositeBrightnessProvider : IBrightnessProvider
                 var monitors = provider.GetMonitors();
                 foreach (var monitor in monitors)
                 {
-                    _providerMap[monitor.Id] = provider;
+                    _providerMap.Store(monitor.Id, provider, generation);
                     allMonitors.Add(monitor);
                 }
             }
@@ -38,7 +43,8 @@ public sealed class CompositeBrightnessProvider : IBrightnessProvider
 
     public bool TrySetBrightness(string monitorId, int percent)
     {
-        if (_providerMap.TryGetValue(monitorId, out var mappedProvider))
+        long generation = _providerMap.Generation;
+        if (_providerMap.TryGet(monitorId, out var mappedProvider))
         {
             if (mappedProvider.TrySetBrightness(monitorId, percent))
             {
@@ -51,7 +57,7 @@ public sealed class CompositeBrightnessProvider : IBrightnessProvider
         {
             if (provider != mappedProvider && provider.TrySetBrightness(monitorId, percent))
             {
-                _providerMap[monitorId] = provider;
+                _providerMap.Store(monitorId, provider, generation);
                 return true;
             }
         }

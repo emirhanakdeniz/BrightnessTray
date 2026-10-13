@@ -37,3 +37,4 @@ $RECYCLE.BIN/
 
 ## Generated lifecycle diagnostic report
 /lifecycle_results.txt
+/performance_results.txt

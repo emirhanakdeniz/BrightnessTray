@@ -6,10 +6,33 @@ public class DdcCiProvider : IBrightnessProvider
 {
     private const int MaxRetries = 3;
     private const int RetryDelayMs = 50;
+    private readonly TopologyCache<(uint Min, uint Max)> _ranges = new();
+    private readonly BrightnessReader _readBrightness;
+    private readonly Func<IntPtr, uint, bool> _writeBrightness;
+
+    internal delegate bool BrightnessReader(IntPtr handle, out uint min, out uint current, out uint max);
+
+    public DdcCiProvider() : this(GetMonitorBrightnessWithRetry, SetMonitorBrightnessWithRetry) { }
+
+    internal DdcCiProvider(BrightnessReader readBrightness, Func<IntPtr, uint, bool> writeBrightness)
+    {
+        _readBrightness = readBrightness;
+        _writeBrightness = writeBrightness;
+    }
+
+    public void InvalidateCache() => _ranges.Invalidate();
+
+    internal long CacheGeneration => _ranges.Generation;
+
+    internal void RememberRange(string id, uint min, uint max, long generation)
+    {
+        if (max >= min) _ranges.Store(id, (min, max), generation);
+    }
 
     public IReadOnlyList<MonitorInfo> GetMonitors()
     {
         var result = new List<MonitorInfo>();
+        long generation = _ranges.Generation;
 
         try
         {
@@ -35,9 +58,10 @@ public class DdcCiProvider : IBrightnessProvider
                     for (int i = 0; i < count; i++)
                     {
                         var pm = physicalMonitors[i];
-                        if (GetMonitorBrightnessWithRetry(pm.hPhysicalMonitor, out uint min, out uint current, out uint max))
+                        if (_readBrightness(pm.hPhysicalMonitor, out uint min, out uint current, out uint max))
                         {
                             string id = GetStableMonitorId(deviceName, i);
+                            RememberRange(id, min, max, generation);
                             string desc = pm.szPhysicalMonitorDescription;
                             string displayName = string.IsNullOrWhiteSpace(desc) ? deviceName : desc;
 
@@ -50,6 +74,7 @@ public class DdcCiProvider : IBrightnessProvider
                                 MaxBrightness = max
                             });
                         }
+                        else InvalidateCache();
                     }
                 }
                 finally
@@ -60,6 +85,7 @@ public class DdcCiProvider : IBrightnessProvider
         }
         catch
         {
+            InvalidateCache();
             // Fail silently with retry, never crash
         }
 
@@ -105,17 +131,7 @@ public class DdcCiProvider : IBrightnessProvider
                             string.Equals(fallbackId, monitorId, StringComparison.OrdinalIgnoreCase))
                         {
                             var pm = physicalMonitors[i];
-                            if (!GetMonitorBrightnessWithRetry(pm.hPhysicalMonitor, out uint min, out _, out uint max))
-                            {
-                                return false;
-                            }
-
-                            if (max < min) return false;
-
-                            uint targetBrightness = min + (uint)Math.Round((clampedPercent / 100.0) * (max - min));
-                            targetBrightness = Math.Clamp(targetBrightness, min, max);
-
-                            return SetMonitorBrightnessWithRetry(pm.hPhysicalMonitor, targetBrightness);
+                            return TrySetPhysicalBrightness(stableId, pm.hPhysicalMonitor, clampedPercent);
                         }
                     }
                 }
@@ -127,9 +143,35 @@ public class DdcCiProvider : IBrightnessProvider
         }
         catch
         {
+            InvalidateCache();
             // Fail silently, never crash
         }
 
+        InvalidateCache();
+        return false;
+    }
+
+    internal bool TrySetPhysicalBrightness(string monitorId, IntPtr handle, int percent)
+    {
+        long generation = _ranges.Generation;
+        try
+        {
+            if (!_ranges.TryGet(monitorId, out var range))
+            {
+                if (!_readBrightness(handle, out uint min, out _, out uint max) || max < min)
+                {
+                    InvalidateCache();
+                    return false;
+                }
+                range = (min, max);
+                RememberRange(monitorId, min, max, generation);
+            }
+
+            uint target = range.Min + (uint)Math.Round(Math.Clamp(percent, 0, 100) / 100.0 * (range.Max - range.Min));
+            if (_writeBrightness(handle, Math.Clamp(target, range.Min, range.Max))) return true;
+        }
+        catch { /* Providers fail silently; a later request will reload the range. */ }
+        InvalidateCache();
         return false;
     }
 

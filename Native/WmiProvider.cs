@@ -7,6 +7,21 @@ public class WmiProvider : IBrightnessProvider
     private const int MaxAttempts = 3;
     private const int RetryDelayMs = 50;
     private readonly ManagementScope _wmiScope = new(@"root\WMI");
+    private readonly TopologyCache<IReadOnlyDictionary<string, string>> _names = new();
+    private readonly Func<IReadOnlyDictionary<string, string>> _loadFriendlyNames;
+    private static readonly IReadOnlyDictionary<string, string> EmptyNames = new Dictionary<string, string>();
+
+    public WmiProvider()
+    {
+        _loadFriendlyNames = QueryFriendlyNames;
+    }
+
+    internal WmiProvider(Func<IReadOnlyDictionary<string, string>> loadFriendlyNames)
+    {
+        _loadFriendlyNames = loadFriendlyNames;
+    }
+
+    public void InvalidateCache() => _names.Invalidate();
 
     public IReadOnlyList<MonitorInfo> GetMonitors()
     {
@@ -15,6 +30,7 @@ public class WmiProvider : IBrightnessProvider
         // If the laptop lid is closed (or internal display path is inactive in Windows topology), do not show it
         if (!DisplayConfigInterop.IsInternalDisplayActive())
         {
+            InvalidateCache();
             return monitors;
         }
 
@@ -60,10 +76,12 @@ public class WmiProvider : IBrightnessProvider
         }
         catch (ManagementException)
         {
+            InvalidateCache();
             // Gracefully handle systems without WMI-controlled internal panels
         }
         catch
         {
+            InvalidateCache();
             // Fail silently, never crash
         }
 
@@ -84,6 +102,7 @@ public class WmiProvider : IBrightnessProvider
             if (attempt < MaxAttempts - 1) Thread.Sleep(RetryDelayMs);
         }
 
+        InvalidateCache();
         return false;
     }
 
@@ -123,45 +142,44 @@ public class WmiProvider : IBrightnessProvider
         return false;
     }
 
-    private Dictionary<string, string> GetFriendlyNames()
+    internal IReadOnlyDictionary<string, string> GetFriendlyNames()
     {
-        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(_wmiScope, new SelectQuery("WmiMonitorID"));
-            using var results = searcher.Get();
-
-            foreach (ManagementObject mo in results)
-            {
-                using (mo)
-                {
-                    string instanceName = (string)(mo["InstanceName"] ?? string.Empty);
-                    if (string.IsNullOrWhiteSpace(instanceName))
-                    {
-                        continue;
-                    }
-
-                    string name = DecodeWmiString(mo["UserFriendlyName"] as ushort[]);
-                    if (string.IsNullOrWhiteSpace(name))
-                    {
-                        string mfg = DecodeWmiString(mo["ManufacturerName"] as ushort[]);
-                        name = !string.IsNullOrWhiteSpace(mfg)
-                            ? $"{mfg} Internal Display"
-                            : "Built-in Display";
-                    }
-
-                    dict[instanceName] = name;
-                }
-            }
-        }
-        catch (ManagementException)
-        {
-            // Gracefully handle
-        }
+        try { return _names.GetOrLoad("names", _loadFriendlyNames); }
         catch
         {
-            // Fail silently
+            InvalidateCache();
+            return EmptyNames;
+        }
+    }
+
+    private IReadOnlyDictionary<string, string> QueryFriendlyNames()
+    {
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using var searcher = new ManagementObjectSearcher(_wmiScope, new SelectQuery("WmiMonitorID"));
+        using var results = searcher.Get();
+
+        // Exceptions reach GetFriendlyNames, which keeps unsuccessful loads uncached.
+        foreach (ManagementObject mo in results)
+        {
+            using (mo)
+            {
+                string instanceName = (string)(mo["InstanceName"] ?? string.Empty);
+                if (string.IsNullOrWhiteSpace(instanceName))
+                {
+                    continue;
+                }
+
+                string name = DecodeWmiString(mo["UserFriendlyName"] as ushort[]);
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    string mfg = DecodeWmiString(mo["ManufacturerName"] as ushort[]);
+                    name = !string.IsNullOrWhiteSpace(mfg)
+                        ? $"{mfg} Internal Display"
+                        : "Built-in Display";
+                }
+
+                dict[instanceName] = name;
+            }
         }
 
         return dict;

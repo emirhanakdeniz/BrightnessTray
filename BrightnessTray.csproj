@@ -20,7 +20,8 @@
     <Description>Windows 11 system tray app for monitor brightness control via DDC/CI</Description>
 
     <!-- Startup & Memory Optimizations -->
-    <PublishReadyToRun>true</PublishReadyToRun>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <TieredPGO>false</TieredPGO>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <ServerGarbageCollector>false</ServerGarbageCollector>

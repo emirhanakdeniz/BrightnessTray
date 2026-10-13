@@ -15,6 +15,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly IBrightnessProvider _brightnessProvider;
     private readonly SettingsService _settingsService;
     private readonly BrightnessService _brightnessService;
+    private readonly MonitorDiscoveryService _monitorDiscovery;
+    private Task? _startupInitializationTask;
     private readonly SystemMessageListenerWindow _systemListenerWindow;
     private readonly SynchronizationContext _uiSyncContext;
 
@@ -53,6 +55,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _brightnessProvider = brightnessProvider;
 
         _brightnessService = new BrightnessService(_brightnessProvider, _settingsService);
+        _monitorDiscovery = new MonitorDiscoveryService(_brightnessProvider, _brightnessService);
 
         int dpi = IconRenderer.GetTaskbarDpi();
         bool isLight = IconRenderer.IsSystemTaskbarLight();
@@ -140,10 +143,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _loggedIdleMessage = false;
 #endif
         RefreshTrayIcon(recreateTrayIcon: false);
-        if (_flyoutForm != null && !_flyoutForm.IsDisposed)
-        {
-            _flyoutForm.OnDisplayConfigurationChanged();
-        }
+        _monitorDiscovery.Invalidate();
         _ = StartupInitializationAsync();
     }
 
@@ -162,6 +162,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 #if DEBUG
         _loggedIdleMessage = false;
 #endif
+        _monitorDiscovery.Invalidate();
         _ = StartupInitializationAsync();
     }
 
@@ -316,12 +317,24 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private async Task StartupInitializationAsync()
+    private Task StartupInitializationAsync()
+    {
+        if (_startupInitializationTask is { IsCompleted: false }) return _startupInitializationTask;
+        return _startupInitializationTask = InitializeStartupAsync();
+    }
+
+    private async Task InitializeStartupAsync()
     {
         try
         {
             if (_disposed || _isExiting) return;
-            var monitors = await Task.Run(() => _brightnessProvider.GetMonitors());
+            MonitorDiscoveryService.Snapshot snapshot;
+            do
+            {
+                snapshot = await _monitorDiscovery.GetMonitorsAsync();
+                if (_disposed || _isExiting) return;
+            } while (!_monitorDiscovery.IsCurrent(snapshot));
+            var monitors = snapshot.Monitors;
             if (_disposed || _isExiting) return;
 
             lock (_monitorStateLock)
@@ -332,14 +345,14 @@ public sealed class TrayApplicationContext : ApplicationContext
                 for (int i = 0; i < monitors.Count; i++)
                 {
                     var m = monitors[i];
-                    _monitorBrightnessMap[m.Id] = m.CurrentPercent;
+                    _monitorBrightnessMap[m.Id] = _brightnessService.ResolveReadBrightness(m.Id, m.CurrentPercent, snapshot.ReadVersion);
                     _monitorNameMap[m.Id] = m.Name;
                 }
             }
 
             _uiSyncContext.Post(_ =>
             {
-                if (_disposed || _isExiting) return;
+                if (_disposed || _isExiting || !_monitorDiscovery.IsCurrent(snapshot)) return;
                 ApplyTooltipText();
                 if (_flyoutForm != null && !_flyoutForm.IsDisposed)
                 {
@@ -356,7 +369,8 @@ public sealed class TrayApplicationContext : ApplicationContext
                     var monitor = monitors[i];
                     if (settings.MonitorBrightness.TryGetValue(monitor.Id, out int savedPercent))
                     {
-                        if (savedPercent != monitor.CurrentPercent)
+                        if (savedPercent != monitor.CurrentPercent &&
+                            !_brightnessService.HasNewerRequest(monitor.Id, snapshot.ReadVersion))
                         {
                             _brightnessService.RequestBrightness(monitor.Id, savedPercent);
                         }
@@ -472,7 +486,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (_flyoutForm == null || _flyoutForm.IsDisposed)
         {
             long start = Stopwatch.GetTimestamp();
-            _flyoutForm = new FlyoutForm(_brightnessProvider, _brightnessService, _settingsService);
+            _flyoutForm = new FlyoutForm(_brightnessProvider, _brightnessService, _settingsService,
+                monitorDiscovery: _monitorDiscovery);
             _flyoutForm.SetNotifyIcon(_notifyIcon);
             _flyoutForm.MonitorRenamed += OnMonitorRenamed;
             _flyoutForm.FlyoutClosed += OnFlyoutClosed;
@@ -537,8 +552,14 @@ public sealed class TrayApplicationContext : ApplicationContext
         _isTogglingBrightnessMute = true;
         try
         {
-            long readVersion = _brightnessService.CaptureReadVersion();
-            var monitors = await Task.Run(() => _brightnessProvider.GetMonitors());
+            MonitorDiscoveryService.Snapshot snapshot;
+            do
+            {
+                snapshot = await _monitorDiscovery.GetMonitorsAsync();
+                if (_disposed || _isExiting) return;
+            } while (!_monitorDiscovery.IsCurrent(snapshot));
+            long readVersion = snapshot.ReadVersion;
+            var monitors = snapshot.Monitors;
             if (_disposed || _isExiting || monitors.Count == 0) return;
 
             // Keep state on the UI thread and include writes still in the debounce window.
@@ -678,6 +699,69 @@ public sealed class TrayApplicationContext : ApplicationContext
         sb.AppendLine("============================================");
 
         File.WriteAllText("lifecycle_results.txt", sb.ToString());
+    }
+
+    internal void RunPerformanceTest()
+    {
+        var report = new StringBuilder();
+        using var process = Process.GetCurrentProcess();
+        void Record(string label)
+        {
+            process.Refresh();
+            report.AppendLine($"{label}:");
+            report.AppendLine($"  Working Set: {process.WorkingSet64 / 1024.0 / 1024.0:F2} MiB");
+            report.AppendLine($"  Private Memory: {process.PrivateMemorySize64 / 1024.0 / 1024.0:F2} MiB");
+            report.AppendLine($"  Managed Heap: {GC.GetTotalMemory(false) / 1024.0 / 1024.0:F2} MiB");
+            report.AppendLine($"  Handles: {process.HandleCount}, GDI: {MemoryInterop.GetGuiResources(process.Handle, 0)}, USER: {MemoryInterop.GetGuiResources(process.Handle, 1)}");
+        }
+
+        report.AppendLine("=== 100 Flyout Cycles & 60 Seconds Idle ===");
+        Record("Before cycles (after lifecycle warmup)");
+        for (int cycle = 0; cycle < 100; cycle++)
+        {
+            EnsureFlyoutFormCreated();
+            _flyoutForm!.ShowFlyout(_notifyIcon);
+            Application.DoEvents();
+            _flyoutForm.CloseFlyout();
+            for (int tick = 0; tick < 20; tick++)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            DisposeClosedFlyout();
+            Application.DoEvents();
+            if ((cycle + 1) % 25 == 0) Record($"After {cycle + 1} cycles");
+        }
+        Record("After 100 cycles (no forced GC or working-set trim)");
+
+        // Diagnostic-only one-shot timers. A real message loop keeps broadcasts
+        // and queued callbacks running during the idle sample.
+        using var loop = new ApplicationContext();
+        using var timer = new System.Windows.Forms.Timer { Interval = 5000 };
+        TimeSpan cpuStart = default;
+        long sampleStarted = 0;
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (sampleStarted == 0)
+            {
+                Record("Settled idle start");
+                cpuStart = process.TotalProcessorTime;
+                sampleStarted = Stopwatch.GetTimestamp();
+                timer.Interval = 60000;
+                timer.Start();
+                return;
+            }
+
+            Record("Settled idle end");
+            double elapsedSeconds = Stopwatch.GetElapsedTime(sampleStarted).TotalSeconds;
+            double cpuMs = (process.TotalProcessorTime - cpuStart).TotalMilliseconds;
+            report.AppendLine($"Idle sample: {elapsedSeconds:F2} s, CPU time: {cpuMs:F2} ms");
+            File.WriteAllText("performance_results.txt", report.ToString());
+            loop.ExitThread();
+        };
+        timer.Start();
+        Application.Run(loop);
     }
 
     protected override void Dispose(bool disposing)
