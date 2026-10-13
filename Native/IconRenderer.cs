@@ -50,15 +50,29 @@ public static class IconRenderer
             ? Color.FromArgb(0x1B, 0x1B, 0x1B)
             : Color.FromArgb(255, 255, 255);
 
-        using var bitmap = new Bitmap(size, size, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(bitmap))
+        // Supersample the vector glyph for smooth, consistent strokes at small
+        // tray sizes and fractional display scaling. Both bitmaps are temporary.
+        const int supersampling = 4;
+        int renderSize = size * supersampling;
+        using var rendered = new Bitmap(renderSize, renderSize, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(rendered))
         {
             g.Clear(Color.Transparent);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-            DrawFluentSun(g, size, glyphColor);
+            DrawFluentSun(g, renderSize, glyphColor);
+        }
+
+        using var bitmap = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            g.CompositingMode = CompositingMode.SourceCopy;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.DrawImage(rendered, new Rectangle(0, 0, size, size),
+                0, 0, renderSize, renderSize, GraphicsUnit.Pixel);
         }
 
         // Convert to Icon via GetHicon, clone managed Icon, then free native HICON to prevent leaks
@@ -99,21 +113,20 @@ public static class IconRenderer
         float cy = size / 2f;
         float scale = size / 16f;
 
-        // Proportions based on Microsoft Fluent UI System Icons (Weather Sunny / Brightness filled)
-        float rCircle = 3.0f * scale;
-        float rayInner = 4.8f * scale;
-        float rayOuter = 6.9f * scale;
-        float rayWidth = Math.Max(1.25f, 1.25f * scale);
+        // An open center and separated rays remain legible at the 16 px tray size.
+        float rCircle = 2.8f * scale;
+        float rayInner = 5.0f * scale;
+        float rayOuter = 7.0f * scale;
+        float rayWidth = 1.2f * scale;
 
-        using var brush = new SolidBrush(color);
         using var pen = new Pen(color, rayWidth)
         {
             StartCap = LineCap.Round,
             EndCap = LineCap.Round
         };
 
-        // Solid core sun circle for crisp contrast and visibility against any taskbar
-        g.FillEllipse(brush, cx - rCircle, cy - rCircle, rCircle * 2f, rCircle * 2f);
+        // Leave the center transparent so the taskbar background shows through.
+        g.DrawEllipse(pen, cx - rCircle, cy - rCircle, rCircle * 2f, rCircle * 2f);
 
         // 8 symmetrical radial rays with rounded caps
         for (int i = 0; i < 8; i++)
