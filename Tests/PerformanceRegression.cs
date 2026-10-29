@@ -135,6 +135,54 @@ internal static class PerformanceRegression
         Equal(2, provider.Writes.Count);
     }
 
+    internal static void WheelDisplayProgress()
+    {
+        var provider = new FakeProvider();
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        var displayed = new ConcurrentQueue<int>();
+        brightness.BrightnessDisplayChanged += (id, value) =>
+            displayed.Enqueue(brightness.ResolveDisplayBrightness(id, value, 0));
+        var wheel = new TrayWheelSelection();
+        brightness.RequestSmoothBrightness("A", 0, wheel.GetBrightness("A", 0, 720));
+        Await(brightness.WaitForPendingWritesAsync());
+        var values = displayed.ToArray();
+        Console.WriteLine($"  Wheel displayed percentages: {string.Join(" -> ", values)}.");
+        Check(values.Any(value => value > 0 && value < 30), "Displayed numbers must include transition steps, not jump from 0 straight to the requested 30%.");
+        Equal(30, values[^1]);
+        Equal(30, brightness.ResolveReadBrightness("A", 0, 0));
+    }
+
+    internal static void WheelDisplayState()
+    {
+        using var started = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var provider = new FakeProvider { Write = (_, _) => { started.Set(); Wait(release); return true; } };
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        long readVersion = brightness.CaptureReadVersion();
+        brightness.RequestSmoothBrightness("A", 0, 30);
+        try
+        {
+            Wait(started);
+            Equal(0, brightness.ResolveDisplayBrightness("a", 0, readVersion));
+            Equal(30, brightness.ResolveReadBrightness("A", 0, readVersion));
+            var wheel = new TrayWheelSelection();
+            int next = wheel.GetBrightness("A", brightness.ResolveWheelBrightness("a", 0), 120);
+            Equal(35, next); // A slow display must not lose accumulated wheel input.
+            brightness.RequestSmoothBrightness("A", 0, next);
+            Equal(0, brightness.ResolveDisplayBrightness("A", 0, readVersion));
+        }
+        finally { release.Set(); }
+        Await(brightness.WaitForPendingWritesAsync());
+        Equal(35, brightness.ResolveDisplayBrightness("A", 0, readVersion));
+        Equal(35, brightness.ResolveWheelBrightness("a", 0)); // Final UI update may still be queued.
+        Equal(42, brightness.ResolveDisplayBrightness("A", 42, brightness.CaptureReadVersion()));
+        brightness.RequestBrightness("B", 70);
+        Equal(70, brightness.ResolveDisplayBrightness("b", 0, 0)); // Sliders remain optimistic.
+        Await(brightness.WaitForPendingWritesAsync());
+    }
+
     internal static void WheelResponse()
     {
         using var firstWrite = new ManualResetEventSlim();
@@ -284,6 +332,7 @@ internal static class PerformanceRegression
         Await(brightness.WaitForPendingWritesAsync());
         Equal(1, provider.Writes.Count);
         Equal(0, settings.Service.GetSettings().MonitorBrightness.Count);
+        Equal(50, brightness.ResolveDisplayBrightness("A", 0, 0));
         provider.Write = (_, _) => true;
         brightness.RequestSmoothBrightness("A", 50, 55);
         Await(brightness.WaitForPendingWritesAsync());

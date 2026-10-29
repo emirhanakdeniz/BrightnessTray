@@ -20,6 +20,7 @@ public sealed class BrightnessService : IDisposable
     private const int SmoothDurationMs = 160;
 
     public event Action<string, int>? BrightnessChanged;
+    internal event Action<string, int>? BrightnessDisplayChanged;
 
     private sealed class MonitorDebounceState
     {
@@ -60,6 +61,7 @@ public sealed class BrightnessService : IDisposable
         }
 
         int clampedPercent = Math.Clamp(percent, 0, 100);
+        int displayPercent;
         lock (_lifecycleLock)
         {
             if (_disposed) return;
@@ -88,6 +90,7 @@ public sealed class BrightnessService : IDisposable
                 state.SmoothFromPercent = state.AppliedPercent;
                 state.SmoothStartedAt = state.RequestedAt;
             }
+            displayPercent = state.Smooth ? state.AppliedPercent : state.LatestPercent;
             if (state.Worker == null)
             {
                 WorkerStartCount++;
@@ -96,7 +99,7 @@ public sealed class BrightnessService : IDisposable
             }
         }
 
-        // Notify listeners (e.g. tooltip throttler).
+        // Requested targets remain separate from displayed transition progress.
         try
         {
             BrightnessChanged?.Invoke(monitorId, clampedPercent);
@@ -105,6 +108,7 @@ public sealed class BrightnessService : IDisposable
         {
             // Fail silently
         }
+        NotifyDisplayBrightnessChanged(monitorId, displayPercent);
     }
 
     internal long CaptureReadVersion()
@@ -193,6 +197,7 @@ public sealed class BrightnessService : IDisposable
 
                 // Providers own bounded retries; keep all hardware calls off the UI thread.
                 bool succeeded = WriteBrightness(monitorId, targetPercent);
+                bool notifyDisplay;
                 lock (_lifecycleLock)
                 {
                     if (succeeded)
@@ -200,6 +205,11 @@ public sealed class BrightnessService : IDisposable
                         state.AppliedPercent = targetPercent;
                         state.HasAppliedPercent = true;
                     }
+                    notifyDisplay = succeeded && state.Smooth && !_disposed;
+                }
+                if (notifyDisplay) NotifyDisplayBrightnessChanged(monitorId, targetPercent);
+                lock (_lifecycleLock)
+                {
                     if (!_disposed && state.Version != version) continue;
                     if (!_disposed && state.Smooth && succeeded && state.AppliedPercent != state.LatestPercent) continue;
                     CompleteWorker(state);
@@ -238,6 +248,39 @@ public sealed class BrightnessService : IDisposable
         // native write. Small notches must not become a single abrupt hardware jump.
         step = Math.Clamp(step, 1, Math.Min(maxStep, Math.Abs(remaining)));
         return state.AppliedPercent + direction * step;
+    }
+
+    internal int ResolveDisplayBrightness(string monitorId, int hardwarePercent, long readVersion)
+    {
+        lock (_lifecycleLock)
+        {
+            if (_monitors.TryGetValue(monitorId, out var state) &&
+                (state.IsPending || state.Version > readVersion))
+            {
+                return state.Smooth ? state.AppliedPercent : state.LatestPercent;
+            }
+            return hardwarePercent;
+        }
+    }
+
+    internal int ResolveWheelBrightness(string monitorId, int fallbackPercent)
+    {
+        lock (_lifecycleLock)
+        {
+            if (_monitors.TryGetValue(monitorId, out var state))
+            {
+                if (state.IsPending) return state.LatestPercent;
+                // The UI queue may not have displayed the final step yet.
+                if (state.Smooth) return state.AppliedPercent;
+            }
+            return fallbackPercent;
+        }
+    }
+
+    private void NotifyDisplayBrightnessChanged(string monitorId, int percent)
+    {
+        try { BrightnessDisplayChanged?.Invoke(monitorId, percent); }
+        catch { /* A UI listener must not interrupt a hardware transition. */ }
     }
 
     private bool WriteBrightness(string monitorId, int percent)

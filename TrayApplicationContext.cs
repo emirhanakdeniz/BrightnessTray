@@ -36,8 +36,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private int _currentIconDpi;
     private string _lastTooltipText = "";
 
-    // On-demand one-shot timer for tooltip updates while dragging slider
-    private System.Windows.Forms.Timer? _tooltipThrottleTimer;
+    private readonly UiUpdateThrottle _tooltipUpdates;
     private bool _disposed;
     private bool _isExiting;
     private bool _isTogglingBrightnessMute;
@@ -56,6 +55,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _uiSyncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settingsService = settingsService;
         _brightnessProvider = brightnessProvider;
+        _tooltipUpdates = new UiUpdateThrottle(ApplyTooltipText);
 
         _brightnessService = new BrightnessService(_brightnessProvider, _settingsService);
         _monitorDiscovery = new MonitorDiscoveryService(_brightnessProvider, _brightnessService);
@@ -86,7 +86,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _systemListenerWindow.ResumedFromSleep += OnResumedFromSleep;
 
         // Listen for brightness adjustments to throttle tooltip updates
-        _brightnessService.BrightnessChanged += OnBrightnessChanged;
+        _brightnessService.BrightnessDisplayChanged += OnBrightnessDisplayChanged;
 
         // Listen for live system theme changes (Rule 5)
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
@@ -205,14 +205,14 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void OnBrightnessChanged(string monitorId, int percent)
+    private void OnBrightnessDisplayChanged(string monitorId, int percent)
     {
         _uiSyncContext.Post(_ =>
         {
             if (_disposed || _isExiting) return;
             lock (_monitorStateLock)
             {
-                _monitorBrightnessMap[monitorId] = percent;
+                _monitorBrightnessMap[monitorId] = _brightnessService.ResolveDisplayBrightness(monitorId, percent, 0);
             }
 
             ThrottleTooltipUpdate();
@@ -222,38 +222,12 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void ThrottleTooltipUpdate()
     {
         if (_disposed) return;
-
-        if (_tooltipThrottleTimer == null)
-        {
-            _tooltipThrottleTimer = new System.Windows.Forms.Timer { Interval = 150 };
-            _tooltipThrottleTimer.Tick += OnTooltipThrottleTick;
-        }
-        else
-        {
-            _tooltipThrottleTimer.Stop();
-        }
-
-        _tooltipThrottleTimer.Start();
-    }
-
-    private void OnTooltipThrottleTick(object? sender, EventArgs e)
-    {
-        StopAndDisposeTooltipTimer();
-        if (!_disposed)
-        {
-            ApplyTooltipText();
-        }
+        _tooltipUpdates.Request();
     }
 
     private void StopAndDisposeTooltipTimer()
     {
-        if (_tooltipThrottleTimer != null)
-        {
-            _tooltipThrottleTimer.Stop();
-            _tooltipThrottleTimer.Tick -= OnTooltipThrottleTick;
-            _tooltipThrottleTimer.Dispose();
-            _tooltipThrottleTimer = null;
-        }
+        _tooltipUpdates.Cancel();
     }
 
     private void OnMonitorRenamed(string monitorId, string newDisplayName)
@@ -367,7 +341,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 for (int i = 0; i < monitors.Count; i++)
                 {
                     var m = monitors[i];
-                    _monitorBrightnessMap[m.Id] = _brightnessService.ResolveReadBrightness(m.Id, m.CurrentPercent, snapshot.ReadVersion);
+                    _monitorBrightnessMap[m.Id] = _brightnessService.ResolveDisplayBrightness(m.Id, m.CurrentPercent, snapshot.ReadVersion);
                     _monitorNameMap[m.Id] = m.Name;
                 }
             }
@@ -436,11 +410,10 @@ public sealed class TrayApplicationContext : ApplicationContext
             var target = TrayWheelSelection.ResolveTarget(_cachedMonitors, _settingsService.GetTrayWheelMonitorId());
             if (target == null) return false;
             int baseline = _monitorBrightnessMap.GetValueOrDefault(target.Id, target.CurrentPercent);
-            int current = _brightnessService.ResolveReadBrightness(target.Id, baseline, long.MaxValue);
+            int current = _brightnessService.ResolveWheelBrightness(target.Id, baseline);
             int next = _trayWheelSelection.GetBrightness(target.Id, current, delta);
             if (next != current)
             {
-                _monitorBrightnessMap[target.Id] = next;
                 _brightnessService.RequestSmoothBrightness(target.Id, target.CurrentPercent, next);
             }
             return true; // Consume partial deltas too, but only with a valid target.
@@ -690,7 +663,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                     targetPercent = 50;
                 }
 
-                // BrightnessChanged already updates both the tooltip and any open flyout.
+                // Display notifications update both the tooltip and any open flyout.
                 _brightnessService.RequestBrightness(monitor.Id, targetPercent);
             }
         }
@@ -875,13 +848,14 @@ public sealed class TrayApplicationContext : ApplicationContext
             _disposed = true;
             if (disposing)
             {
-                _brightnessService.BrightnessChanged -= OnBrightnessChanged;
+                _brightnessService.BrightnessDisplayChanged -= OnBrightnessDisplayChanged;
                 SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
 #if DEBUG
                 Application.Idle -= OnApplicationIdle;
 #endif
 
                 StopAndDisposeTooltipTimer();
+                _tooltipUpdates.Dispose();
                 _trayWheelListener.Dispose();
                 _systemListenerWindow.Dispose();
 
