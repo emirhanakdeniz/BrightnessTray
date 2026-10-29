@@ -14,6 +14,7 @@ Designed exclusively for Windows 11 with a solid theme-aware flyout, system acce
 
 - **Hardware Brightness Control**: Real DDC/CI monitor hardware brightness adjustment via Win32 `dxva2.dll` (no software overlays or color tinting).
 - **Internal Panel Support**: Automatic WMI fallback for laptops and built-in displays.
+- **Tray Mouse Wheel**: Scroll over the tray icon to adjust brightness without opening the flyout. A single controllable display is selected automatically; with multiple displays, choose a target in the tray menu.
 - **Windows 11 Native UI**:
   - Light/dark flyout and menus follow the Windows app theme; the tray icon follows the Windows system theme.
   - A compact, headerless flyout with a solid anthracite dark surface, a pale light surface, and native rounded window corners.
@@ -46,6 +47,7 @@ Designed exclusively for Windows 11 with a solid theme-aware flyout, system acce
 - **Slider Drag**: Adjust monitor brightness from 0% to 100%.
 - **Slider Track Click**: Jump to a level with a short visual transition; keep holding and move to drag. Grabbing the thumb preserves the pointer's offset.
 - **Mouse Wheel over Slider/Row**: Step brightness up or down by 5%.
+- **Mouse Wheel over Tray Icon**: Adjust the target display by 5 percentage points per notch, with a short hardware brightness transition instead of a sudden jump. Changes begin while scrolling; small wheel deltas accumulate. One controllable display works automatically; with multiple displays, first choose **Mouse wheel display** in the tray menu. A disconnected selection never silently switches to another display unless only one remains. Your multi-display selection is remembered across restarts and reconnects.
 - **Slider Keyboard Controls**: Arrow keys adjust by 1%, Page Up/Down by 10%, and Home/End select 0%/100%.
 - **Middle-Click Tray Icon**: Quickly toggle brightness between mute (0%) and your previous level.
 - **Right-Click Monitor Name**: Rename, reset a custom name, or collapse/expand that monitor's slider.
@@ -54,6 +56,7 @@ Designed exclusively for Windows 11 with a solid theme-aware flyout, system acce
 - **Long Monitor Lists**: Use the vertical scrollbar to reach additional monitors; wheel input over a row continues to adjust its brightness.
 - **Right-Click Tray Icon**:
   - **Start with Windows**: Enable or disable automatic launch on Windows startup.
+  - **Mouse wheel display**: Choose which display scrolling over the tray icon controls. The active target is checked; custom display names are shown.
   - **About BrightnessTray**: View the app icon, version, description, and maker credit, or open the GitHub repository.
   - **Exit**: Cleanly terminate the application and release all resources.
 - **Flyout Dismissal**: Press Escape or click outside the flyout to close it.
@@ -87,9 +90,11 @@ Single-file compression and ReadyToRun are disabled by default to favor lower me
 
 Brightness is normalized to 0–100% using each monitor's reported minimum and maximum. Hardware reads and writes run off the UI thread; physical monitor handles are opened on demand and released after use.
 
-Writes are debounced for 120 ms per monitor and serialized by one worker while requests are pending. Slider movements update the worker's final target without creating a task or cancellation source for each movement; workers stop when their work finishes. DDC/CI caches only brightness ranges, never physical monitor handles, and reloads ranges after invalidation or failure. DDC/CI retries each hardware read or write up to three times; WMI writes allow up to three attempts. The service does not add another retry layer. Exhausted failures are handled silently.
+Slider, startup, and mute/restore writes are debounced for 120 ms per monitor. Tray-wheel input starts a short eased transition immediately instead of restarting that debounce on every notch. Wheel writes are paced at least 40 ms apart (at most 25 starts per second), with steps capped at 2 percentage points for a single notch and 5 for larger changes. Slow native calls remain serialized and may lengthen the transition; actual smoothness also depends on the monitor's brightness resolution and firmware. A failed step ends the transition rather than introducing service-level retries.
 
-Aliases and successfully applied brightness values are stored in `%APPDATA%\BrightnessTray\settings.json`. Changes use a one-second save debounce and an atomic temporary-file replacement. A failed save remains pending for a later scheduled save, flyout-close flush, or shutdown flush; there is no retry polling loop. Missing or unreadable settings fall back to defaults. Loaded monitor IDs are case-insensitive, brightness values are clamped to 0–100%, and aliases are sanitized; null dictionaries become empty collections.
+Both paths share one worker per monitor while requests are pending. New input updates the final target, including reversing an active transition, without creating a task or cancellation source for each movement; workers stop when their work finishes. The UI shows the requested target, while settings record only successfully applied hardware values. DDC/CI caches only brightness ranges, never physical monitor handles, and reloads ranges after invalidation or failure. DDC/CI retries each hardware read or write up to three times; WMI writes allow up to three attempts. The service does not add another retry layer. Exhausted failures are handled silently.
+
+Aliases, the tray-wheel display selection, and successfully applied brightness values are stored in `%APPDATA%\BrightnessTray\settings.json`. Changes use a one-second save debounce and an atomic temporary-file replacement. A failed save remains pending for a later scheduled save, flyout-close flush, or shutdown flush; there is no retry polling loop. Missing or unreadable settings fall back to defaults. Loaded monitor IDs are case-insensitive, brightness values are clamped to 0–100%, and aliases are sanitized; null dictionaries become empty collections.
 
 Startup, display changes, and resume refresh the monitor list and restore saved brightness when needed. Selecting **Exit** cancels queued brightness requests, waits for active writes to return, and flushes settings. Exiting during a pending debounce preserves the last successfully applied value.
 
@@ -123,6 +128,8 @@ This also writes `performance_results.txt` in the working directory. Allow about
 
 - Drag a slider immediately after opening; confirm it does not jump back when a refresh completes. Check wheel input and middle-click mute/restore.
 - Rename a monitor, exit, and restart; verify persistence. Disconnect a monitor during adjustment and check clean shutdown.
+- Scroll over the tray icon with one controllable display, then with multiple displays and a chosen wheel target. Verify only the target changes, the choice survives restart/reconnect, and an absent target does nothing unless only one display remains. Test the pinned icon and hidden-icons popup, partial/rapid wheel input, Explorer restart, and mixed DPI; scrolling over neighboring icons or an app covering the icon must remain unaffected.
+- Keep scrolling steadily: hardware brightness should start changing before input stops. Check small up/down notches, fast direction reversals, and slow DDC/CI displays. Exit during a transition and confirm the next launch restores the last completed hardware step, not an unapplied target.
 - Check monitor name context menus, chevron collapse/expand, long-name truncation and tooltips, and keyboard access with Tab. With enough monitors to fill the screen, verify the last monitor is reachable using the scrollbar.
 - Grab the slider thumb at its edge and drag to both endpoints; confirm no initial jump. Test track-click-and-drag, fast wheel input, and partial wheel deltas on a precision mouse. Check the tray startup toggle and Escape versus outside-click dismissal.
 - Under **Settings → Personalization → Colors**, choose **Custom** and vary Windows mode and app mode independently. Check the tray icon against Windows mode and the flyout/menus against app mode; change the accent color and transparency effects too.

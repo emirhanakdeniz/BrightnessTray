@@ -135,6 +135,209 @@ internal static class PerformanceRegression
         Equal(2, provider.Writes.Count);
     }
 
+    internal static void WheelResponse()
+    {
+        using var firstWrite = new ManualResetEventSlim();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        long firstWriteMs = -1;
+        var provider = new FakeProvider { Write = (_, _) =>
+        {
+            Interlocked.CompareExchange(ref firstWriteMs, clock.ElapsedMilliseconds, -1);
+            firstWrite.Set();
+            return true;
+        } };
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        var wheel = new TrayWheelSelection();
+        int current = 50;
+        for (int i = 0; i < 6; i++)
+        {
+            current = wheel.GetBrightness("A", current, 120);
+            brightness.RequestSmoothBrightness("A", 50, current);
+            Thread.Sleep(40);
+        }
+        long scrollingEndedMs = clock.ElapsedMilliseconds;
+        Await(brightness.WaitForPendingWritesAsync());
+        Console.WriteLine($"  Wheel response: first write {firstWriteMs} ms; scrolling ended {scrollingEndedMs} ms; {provider.Writes.Count} writes.");
+        Check(firstWriteMs < scrollingEndedMs, "Brightness must start changing during sustained scrolling, not after it stops.");
+        Equal(80, provider.Writes.Last().Percent);
+        Equal(1, brightness.WorkerStartCount);
+    }
+
+    internal static void WheelTransition()
+    {
+        var provider = new FakeProvider();
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        var wheel = new TrayWheelSelection();
+        brightness.RequestSmoothBrightness("A", 50, wheel.GetBrightness("A", 50, 120));
+        Await(brightness.WaitForPendingWritesAsync());
+        var values = provider.Writes.Select(w => w.Percent).ToArray();
+        Console.WriteLine($"  Wheel transition: 50 -> {string.Join(" -> ", values)}.");
+        Check(values.Length > 1 && values[0] < 55, "A wheel notch must pass through intermediate hardware brightness values, not jump straight to its target.");
+        Equal(55, values[^1]);
+        Equal(55, settings.Service.GetSettings().MonitorBrightness["A"]);
+        int previous = 50;
+        foreach (int value in values)
+        {
+            Check(value > previous && value - previous <= 2, "A single notch must rise monotonically in small steps.");
+            previous = value;
+        }
+        // A stale discovery baseline must not cause a jump back on the next notch.
+        brightness.RequestSmoothBrightness("A", 50, 60);
+        Await(brightness.WaitForPendingWritesAsync());
+        Check(provider.Writes.Skip(values.Length).All(w => w.Percent > 55), "A new transition must start from the last applied brightness.");
+        Equal(60, provider.Writes.Last().Percent);
+        int beforeDown = provider.Writes.Count;
+        brightness.RequestSmoothBrightness("A", 50, 55);
+        Await(brightness.WaitForPendingWritesAsync());
+        previous = 60;
+        foreach (var write in provider.Writes.Skip(beforeDown))
+        {
+            Check(write.Percent < previous && previous - write.Percent <= 2, "Downward transitions must also use small monotonic steps.");
+            previous = write.Percent;
+        }
+        Equal(55, previous);
+    }
+
+    internal static void WheelRetarget()
+    {
+        using var started = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var provider = new FakeProvider { Write = (_, _) =>
+        {
+            started.Set();
+            Wait(release);
+            Thread.Sleep(60); // Deliberately slower than the wheel pacing interval.
+            return true;
+        } };
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        brightness.RequestSmoothBrightness("A", 50, 55);
+        try
+        {
+            Wait(started);
+            brightness.RequestSmoothBrightness("a", 50, 45);
+        }
+        finally { release.Set(); }
+        Await(brightness.WaitForPendingWritesAsync());
+        var values = provider.Writes.Select(w => w.Percent).ToArray();
+        Check(values.Length > 1, "The reversal must be applied after the in-flight write.");
+        for (int i = 1; i < values.Length; i++)
+            Check(values[i] < values[i - 1], "A reversed wheel target must not finish the old upward transition first.");
+        Equal(45, values[^1]);
+        Equal(45, settings.Service.GetSettings().MonitorBrightness["A"]);
+        Equal(1, brightness.WorkerStartCount);
+        Equal(1, provider.MaxConcurrentWrites);
+    }
+
+    internal static void WheelSuperseded()
+    {
+        using var started = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var provider = new FakeProvider { Write = (_, _) => { started.Set(); Wait(release); return true; } };
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        brightness.RequestSmoothBrightness("A", 50, 55);
+        try
+        {
+            Wait(started);
+            brightness.RequestBrightness("A", 20); // Slider/mute replaces the ramp.
+        }
+        finally { release.Set(); }
+        Await(brightness.WaitForPendingWritesAsync());
+        Equal(2, provider.Writes.Count);
+        Equal(20, provider.Writes.Last().Percent);
+        Equal(20, settings.Service.GetSettings().MonitorBrightness["A"]);
+        Equal(1, brightness.WorkerStartCount);
+    }
+
+    internal static void WheelPacing()
+    {
+        var timestamps = new ConcurrentQueue<long>();
+        var provider = new FakeProvider { Write = (_, _) =>
+        {
+            timestamps.Enqueue(System.Diagnostics.Stopwatch.GetTimestamp());
+            return true;
+        } };
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        brightness.RequestSmoothBrightness("A", 50, 75);
+        Await(brightness.WaitForPendingWritesAsync());
+        var times = timestamps.ToArray();
+        for (int i = 1; i < times.Length; i++)
+            Check(System.Diagnostics.Stopwatch.GetElapsedTime(times[i - 1], times[i]).TotalMilliseconds >= 35,
+                "Wheel transitions must pace native calls, not flood the monitor with animation frames.");
+        Equal(75, provider.Writes.Last().Percent);
+        Equal(1, brightness.WorkerStartCount);
+        int completedCount = provider.Writes.Count;
+        Thread.Sleep(100);
+        Equal(completedCount, provider.Writes.Count);
+    }
+
+    internal static void WheelFailure()
+    {
+        var provider = new FakeProvider { Write = (_, _) => false };
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        brightness.RequestSmoothBrightness("A", 50, 55);
+        Await(brightness.WaitForPendingWritesAsync());
+        Equal(1, provider.Writes.Count);
+        Equal(0, settings.Service.GetSettings().MonitorBrightness.Count);
+        provider.Write = (_, _) => true;
+        brightness.RequestSmoothBrightness("A", 50, 55);
+        Await(brightness.WaitForPendingWritesAsync());
+        Equal(55, settings.Service.GetSettings().MonitorBrightness["A"]);
+    }
+
+    internal static void WheelShutdown()
+    {
+        using var started = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var provider = new FakeProvider { Write = (_, _) => { started.Set(); Wait(release); return true; } };
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        brightness.RequestSmoothBrightness("A", 50, 55);
+        Task stopped;
+        try
+        {
+            Wait(started);
+            brightness.RequestSmoothBrightness("A", 50, 80);
+            stopped = brightness.StopAsync();
+            Check(!stopped.IsCompleted, "Shutdown must wait for the in-flight transition step.");
+        }
+        finally { release.Set(); }
+        Await(stopped);
+        Equal(1, provider.Writes.Count);
+        int applied = provider.Writes.Single().Percent;
+        Check(applied < 55, "Only the in-flight intermediate value should be applied.");
+        Equal(applied, settings.Service.GetSettings().MonitorBrightness["A"]);
+    }
+
+    internal static void TrayWheelBurst()
+    {
+        var provider = new FakeProvider();
+        using var settings = new SettingsFixture();
+        using var brightness = new BrightnessService(provider, settings.Service);
+        settings.Service.SetTrayWheelMonitorId("b");
+        var monitors = Monitors("A").Concat(Monitors("B")).ToArray();
+        var target = TrayWheelSelection.ResolveTarget(monitors, settings.Service.GetTrayWheelMonitorId())!;
+        var wheel = new TrayWheelSelection();
+        brightness.RequestBrightness(target.Id, 40); // Include a pending slider request.
+        foreach (int delta in new[] { 60, 60, 120, 120, -120, 240 })
+        {
+            int current = brightness.ResolveReadBrightness(target.Id, 10, long.MaxValue);
+            int next = wheel.GetBrightness(target.Id, current, delta);
+            if (next != current) brightness.RequestSmoothBrightness(target.Id, target.CurrentPercent, next);
+        }
+        Equal(1, brightness.WorkerStartCount);
+        Await(brightness.WaitForPendingWritesAsync());
+        Check(provider.Writes.All(w => w.Id == "B"), "Only the selected monitor may be written.");
+        Equal(60, provider.Writes.Last().Percent);
+        Equal(60, settings.Service.GetSettings().MonitorBrightness["b"]);
+        Check(!settings.Service.GetSettings().MonitorBrightness.ContainsKey("A"), "Wheel input must not change other displays.");
+    }
+
     internal static void LatestWrite()
     {
         using var started = new ManualResetEventSlim();

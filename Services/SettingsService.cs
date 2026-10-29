@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 
 public sealed class AppSettings
 {
+    public string? TrayWheelMonitorId { get; set; }
     public Dictionary<string, int> MonitorBrightness { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> MonitorAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
@@ -50,9 +51,26 @@ public sealed class SettingsService : IDisposable
         {
             return new AppSettings
             {
+                TrayWheelMonitorId = _settings.TrayWheelMonitorId,
                 MonitorBrightness = new Dictionary<string, int>(_settings.MonitorBrightness, StringComparer.OrdinalIgnoreCase),
                 MonitorAliases = new Dictionary<string, string>(_settings.MonitorAliases, StringComparer.OrdinalIgnoreCase)
             };
+        }
+    }
+
+    public string? GetTrayWheelMonitorId()
+    {
+        lock (_lock) return _settings.TrayWheelMonitorId;
+    }
+
+    public void SetTrayWheelMonitorId(string? monitorId)
+    {
+        string? id = string.IsNullOrWhiteSpace(monitorId) ? null : monitorId;
+        lock (_lock)
+        {
+            if (_disposed || string.Equals(_settings.TrayWheelMonitorId, id, StringComparison.OrdinalIgnoreCase)) return;
+            _settings.TrayWheelMonitorId = id;
+            ScheduleSave();
         }
     }
 
@@ -238,6 +256,8 @@ public sealed class SettingsService : IDisposable
     {
         var loaded = JsonSerializer.Deserialize(json, AppSettingsJsonContext.Default.AppSettings);
         var settings = new AppSettings();
+        settings.TrayWheelMonitorId = string.IsNullOrWhiteSpace(loaded?.TrayWheelMonitorId)
+            ? null : loaded.TrayWheelMonitorId;
 
         // JSON dictionaries do not retain our comparer and may explicitly be null.
         if (loaded?.MonitorBrightness != null)

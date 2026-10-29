@@ -16,6 +16,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly SettingsService _settingsService;
     private readonly BrightnessService _brightnessService;
     private readonly MonitorDiscoveryService _monitorDiscovery;
+    private readonly TrayWheelSelection _trayWheelSelection = new();
+    private readonly TrayWheelListener _trayWheelListener;
     private Task? _startupInitializationTask;
     private readonly SystemMessageListenerWindow _systemListenerWindow;
     private readonly SynchronizationContext _uiSyncContext;
@@ -74,6 +76,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon.MouseClick += OnNotifyIconMouseClick;
         _notifyIcon.MouseDown += OnNotifyIconMouseDown;
         _notifyIcon.MouseUp += OnNotifyIconMouseUp;
+        _trayWheelListener = new TrayWheelListener(_notifyIcon, OnTrayMouseWheel, _trayWheelSelection.Reset);
 
         // Top-level hidden native window listening for OS broadcasts (theme, display change, taskbar recreate, resume from sleep)
         _systemListenerWindow = new SystemMessageListenerWindow();
@@ -146,6 +149,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 #endif
         RefreshTrayIcon(recreateTrayIcon: false);
         _monitorDiscovery.Invalidate();
+        InvalidateTrayWheelMonitors();
         _ = StartupInitializationAsync();
     }
 
@@ -165,6 +169,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _loggedIdleMessage = false;
 #endif
         _monitorDiscovery.Invalidate();
+        InvalidateTrayWheelMonitors();
         _ = StartupInitializationAsync();
     }
 
@@ -296,7 +301,22 @@ public sealed class TrayApplicationContext : ApplicationContext
             }
             else
             {
-                text = $"Brightness: {count} displays";
+                lock (_monitorStateLock)
+                {
+                    var target = TrayWheelSelection.ResolveTarget(_cachedMonitors, _settingsService.GetTrayWheelMonitorId());
+                    if (target != null && _monitorBrightnessMap.TryGetValue(target.Id, out int percent))
+                    {
+                        int index = 0;
+                        while (index < _cachedMonitors.Count && !ReferenceEquals(_cachedMonitors[index], target)) index++;
+                        string name = MonitorNameResolver.Resolve(target.Id, target.Name,
+                            index + 1, _settingsService);
+                        text = $"Scroll: {name}: {percent}%";
+                    }
+                    else
+                    {
+                        text = $"Brightness: {count} displays — right-click to choose wheel display";
+                    }
+                }
             }
 
             // Clamp strictly to 127 characters limit
@@ -402,6 +422,67 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (e.Button == MouseButtons.Right) EnsureContextMenuCreated();
     }
 
+    private void InvalidateTrayWheelMonitors()
+    {
+        lock (_monitorStateLock) _cachedMonitors = Array.Empty<MonitorInfo>();
+        _trayWheelSelection.Reset();
+    }
+
+    private bool OnTrayMouseWheel(int delta)
+    {
+        if (_disposed || _isExiting || _contextMenu is { Visible: true }) return false;
+        lock (_monitorStateLock)
+        {
+            var target = TrayWheelSelection.ResolveTarget(_cachedMonitors, _settingsService.GetTrayWheelMonitorId());
+            if (target == null) return false;
+            int baseline = _monitorBrightnessMap.GetValueOrDefault(target.Id, target.CurrentPercent);
+            int current = _brightnessService.ResolveReadBrightness(target.Id, baseline, long.MaxValue);
+            int next = _trayWheelSelection.GetBrightness(target.Id, current, delta);
+            if (next != current)
+            {
+                _monitorBrightnessMap[target.Id] = next;
+                _brightnessService.RequestSmoothBrightness(target.Id, target.CurrentPercent, next);
+            }
+            return true; // Consume partial deltas too, but only with a valid target.
+        }
+    }
+
+    private FluentMenuItem CreateTrayWheelMenu()
+    {
+        var picker = new FluentMenuItem("Mouse wheel display", "\uE7F4");
+        string? selectedId = _settingsService.GetTrayWheelMonitorId();
+        lock (_monitorStateLock)
+        {
+            var target = TrayWheelSelection.ResolveTarget(_cachedMonitors, selectedId);
+            string hint = _cachedMonitors.Count switch
+            {
+                0 => "No controllable displays",
+                1 => "One display: selected automatically",
+                _ when target != null => "Scroll over the tray icon to adjust",
+                _ when selectedId != null => "Selected display is disconnected",
+                _ => "Choose a display for scrolling"
+            };
+            picker.DropDownItems.Add(new FluentMenuItem(hint) { Enabled = false });
+            if (_cachedMonitors.Count > 0) picker.DropDownItems.Add(new ToolStripSeparator());
+            for (int i = 0; i < _cachedMonitors.Count; i++)
+            {
+                var monitor = _cachedMonitors[i];
+                string name = MonitorNameResolver.Resolve(monitor.Id, monitor.Name, i + 1, _settingsService);
+                var item = new FluentMenuItem($"{i + 1}. {name}", onClick: (_, _) =>
+                {
+                    _settingsService.SetTrayWheelMonitorId(monitor.Id);
+                    _trayWheelSelection.Reset();
+                    ApplyTooltipText();
+                })
+                {
+                    Checked = string.Equals(target?.Id, monitor.Id, StringComparison.OrdinalIgnoreCase)
+                };
+                picker.DropDownItems.Add(item);
+            }
+        }
+        return picker;
+    }
+
     private void OnNotifyIconMouseUp(object? sender, MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Right && _contextMenu is { Visible: false })
@@ -419,6 +500,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Opening += (_, _) => startupItem.Checked = AutoStartManager.IsAutoStartEnabled();
         menu.Items.AddRange([
             startupItem,
+            CreateTrayWheelMenu(),
             new ToolStripSeparator(),
             new FluentMenuItem("About BrightnessTray", "\uE946", OnAboutClicked),
             new FluentMenuItem("Exit", "\uE7E8", OnExitClicked)
@@ -631,6 +713,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (_disposed || _isExiting) return;
         _isExiting = true;
+        _trayWheelListener.Dispose();
         StopAndDisposeTooltipTimer();
 
         if (_notifyIcon is not null)
@@ -799,6 +882,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 #endif
 
                 StopAndDisposeTooltipTimer();
+                _trayWheelListener.Dispose();
                 _systemListenerWindow.Dispose();
 
                 if (_notifyIcon is not null)
