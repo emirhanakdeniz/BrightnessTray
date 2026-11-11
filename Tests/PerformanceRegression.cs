@@ -103,7 +103,7 @@ internal static class PerformanceRegression
         finally { release.Set(); }
         var result = Await(scan);
         Equal(80, brightness.ResolveReadBrightness("A", 20, result.ReadVersion));
-        Check(brightness.HasNewerRequest("A", result.ReadVersion), "Startup restore must not overwrite a newer user request.");
+        Check(brightness.HasNewerRequest("A", result.ReadVersion), "A shared scan must detect a newer user request.");
         Equal(20, brightness.ResolveReadBrightness("A", 20, brightness.CaptureReadVersion()));
     }
 

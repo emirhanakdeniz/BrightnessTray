@@ -91,7 +91,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         // Listen for live system theme changes (Rule 5)
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
-        // Restore saved brightness values and initialize tooltip status
+        // Read current hardware brightness and initialize tooltip status.
         _ = StartupInitializationAsync();
 
 #if DEBUG
@@ -356,23 +356,6 @@ public sealed class TrayApplicationContext : ApplicationContext
                 }
             }, null);
 
-            // Restore saved brightness values
-            var settings = _settingsService.GetSettings();
-            if (settings.MonitorBrightness.Count > 0)
-            {
-                for (int i = 0; i < monitors.Count; i++)
-                {
-                    var monitor = monitors[i];
-                    if (settings.MonitorBrightness.TryGetValue(monitor.Id, out int savedPercent))
-                    {
-                        if (savedPercent != monitor.CurrentPercent &&
-                            !_brightnessService.HasNewerRequest(monitor.Id, snapshot.ReadVersion))
-                        {
-                            _brightnessService.RequestBrightness(monitor.Id, savedPercent);
-                        }
-                    }
-                }
-            }
         }
         catch
         {
